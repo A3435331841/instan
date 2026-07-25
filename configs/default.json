@@ -1,0 +1,14 @@
+{
+  "tracker": "ncc",
+  "patch_size": 255,
+  "sr_ratio": 3.0,
+  "sr_min_fov": 20.0,
+  "lost_score": 0.45,
+  "lost_psr": 7.0,
+  "lost_apce": 0.0,
+  "redetect_interval": 1,
+  "max_lost_frames": 1000000,
+  "template_size": 127,
+  "search_scale": 2.0,
+  "lr": 0.02
+}

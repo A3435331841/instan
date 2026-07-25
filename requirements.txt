@@ -1,0 +1,6 @@
+# -*- coding: utf-8 -*-
+"""panotrack 运行依赖（Python 3.12，仅 numpy / Pillow / scipy）+ onnxruntime（Docker构建期安装）"""
+numpy>=1.26.0
+Pillow>=10.0.0
+scipy>=1.11.3
+onnxruntime>=1.15.0

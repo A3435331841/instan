@@ -1,0 +1,11 @@
+# Docker 构建上下文裁剪：镜像只保留运行必需内容（断网自包含）
+.git
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+tests/
+demo/
+runs/
+*.md
+!README.md
