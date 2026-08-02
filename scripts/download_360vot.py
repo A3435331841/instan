@@ -6,10 +6,13 @@
   2. 打开仓库页 https://huggingface.co/datasets/xuyzshaun/360VOTS
      点击 "Request access" 提交申请，等待通过（邮件/页面确认）。
   3. 创建 Read 权限令牌：https://huggingface.co/settings/tokens
-  4. 把令牌写入环境变量 HF_TOKEN（禁止写进代码/命令行历史）：
-       Windows 当前会话:  set HF_TOKEN=hf_xxxxxxxx
-       Windows 永久:      setx HF_TOKEN hf_xxxxxxxx   （重开终端生效）
-       Linux/macOS:       export HF_TOKEN=hf_xxxxxxxx
+  4. 设置访问令牌（二选一）：
+       a. 写入环境变量 HF_TOKEN（禁止写进代码/命令行历史）：
+            Windows 当前会话:  set HF_TOKEN=hf_xxxxxxxx
+            Windows 永久:      setx HF_TOKEN hf_xxxxxxxx   （重开终端生效）
+            Linux/macOS:       export HF_TOKEN=hf_xxxxxxxx
+       b. 或写入标准令牌文件 ~/.cache/huggingface/token
+          （huggingface-cli login 同款位置，本脚本会自动读取）
   5. 安装下载依赖：pip install huggingface_hub
      （未安装时本脚本打印本提示并以退出码 2 退出；仅本下载脚本需要，
        跟踪/评测代码仍只依赖 numpy/Pillow/scipy）
@@ -18,14 +21,18 @@
   python scripts/download_360vot.py                          # 默认 5 个代表序列
   python scripts/download_360vot.py --seqs 001,002,003 --out data360 --extract
 
-脚本默认把 HF_ENDPOINT 设为 https://hf-mirror.com（国内镜像）；
-已自行设置该环境变量时尊重原值。进度与错误信息走 stderr，摘要走 stdout。
+注意：
+  - 仓库内 360VOT-test 前缀下文件为 4 位编号（0001.zip~0120.zip），
+    360VOS-test 前缀下为 3 位编号（001.zip~120.zip）；脚本按 --prefix 自动选择。
+  - 默认直连官方端点 huggingface.co（hf-mirror.com 对 gated 仓库不可用）；
+    如需镜像请自行 export HF_ENDPOINT=https://hf-mirror.com。
+进度与错误信息走 stderr，摘要走 stdout。
 退出码：0 全部成功；1 部分/全部失败；2 缺少 huggingface_hub；3 缺少 HF_TOKEN。
 """
 import os
 
-# 必须在 import huggingface_hub 之前设置镜像端点（其常量在导入时读取）
-os.environ.setdefault('HF_ENDPOINT', 'https://hf-mirror.com')
+# 不默认设置 HF_ENDPOINT：直连官方端点（hf-mirror 对 gated 仓库会 404/连接失败）
+# 若用户自行设置了 HF_ENDPOINT，huggingface_hub 会尊重该值。
 
 import argparse
 import sys
@@ -65,10 +72,14 @@ def _log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
-def _normalize_seq(s):
-    """序列号规范化：纯数字补零到 3 位（'1' -> '001'，私有）。"""
+def _normalize_seq(s, width=3):
+    """序列号规范化：纯数字补零到 width 位（默认 3 位，'1' -> '001'，私有）。
+
+    width 由 --prefix 决定：360VOT-test 下文件为 4 位编号（0001.zip~0120.zip），
+    360VOS-test 下为 3 位编号（001.zip~120.zip）。
+    """
     s = s.strip()
-    return s.zfill(3) if s.isdigit() else s
+    return s.zfill(width) if s.isdigit() else s
 
 
 def _safe_extract(zip_path, dst):
@@ -135,17 +146,25 @@ def main(argv=None):
     p.add_argument('--out', default=str(PROJECT_ROOT / 'data360'),
                    help='输出根目录（默认 <项目>/data360）')
     p.add_argument('--prefix', default=DEFAULT_PREFIX,
-                   help=f'仓库内路径前缀（默认 {DEFAULT_PREFIX}，形如 <prefix>/001.zip）')
+                   help=f'仓库内路径前缀（默认 {DEFAULT_PREFIX}，形如 <prefix>/001.zip；'
+                        f'360VOT-test 为 4 位编号 0001.zip~0120.zip）')
     p.add_argument('--extract', action='store_true',
                    help='下载后解压并删除 zip（推荐，评测脚本只识别解压后的目录）')
     args = p.parse_args(argv)
 
     token = os.environ.get('HF_TOKEN')
     if not token:
+        # 兜底：读取标准 HF 令牌文件（huggingface-cli login 同款位置）
+        tok_file = Path.home() / '.cache' / 'huggingface' / 'token'
+        if tok_file.is_file():
+            token = tok_file.read_text(encoding='utf-8').strip()
+    if not token:
         print(TOKEN_GUIDE, file=sys.stderr)
         return 3
 
-    seqs = [_normalize_seq(s) for s in args.seqs.split(',') if s.strip()]
+    # 编号位数：360VOT-test 为 4 位（0001.zip），其余默认 3 位（001.zip）
+    width = 4 if 'VOT-test' in args.prefix else 3
+    seqs = [_normalize_seq(s, width) for s in args.seqs.split(',') if s.strip()]
     out = Path(args.out)
     ok, failed = [], []
     for seq in seqs:

@@ -60,8 +60,18 @@ panotrack/trackers/factory.py
 - 必须线程无关、无全局状态；大补丁下复杂度可控（FFT 实现）。
 
 ### factory.py
-- `create_tracker(name='ncc', **kwargs) -> BaseTracker`；`name='lightfc'` 时抛出 `NotImplementedError` 并在消息中说明"待接入 LightFC 深度学习模型（需 torch/onnxruntime），接口已预留"。
+- `create_tracker(name='ncc', **kwargs) -> BaseTracker`。
+- `name='lightfc_onnx'` 时返回 `LightFCONNX`（onnxruntime 双子图，生产部署，CPU 实时）；
+  需要 `backbone_path` / `tracking_path` 两个 ONNX 路径。初始化失败回退 `ncc_v2`。
+- `name='lightfc_cpu'` 时返回 `LightFCTracker`（torch CPU，本地验证用）。
 - `name='direct_erp'` 时返回 `DirectERPTracker`，直接在全帧 ERP 上运行 VitTrack，绕过 BFoV 框架。
+
+### lightfc_onnx.py / lightfc_cpu.py
+- `class LightFCONNX(BaseTracker)` / `class LightFCTracker(BaseTracker)`：
+  - `init(image, bbox)`：image 为 (H,W,3) uint8 **ERP 全帧**；bbox=(x,y,w,h) ERP 坐标（可跨界）。
+  - `update(image) -> dict`：返回 `{'bbox': (x,y,w,h), 'score': float, 'psr': float, 'apce': float}`。
+  - 全帧跟踪（同 Direct ERP 思路），搜索区裁剪水平回绕处理 360° 跨界；
+    自带状态代理字段 `_cx/_cy/_w/_h`，兼容 PanoTracker 的 tracker 迁移。
 
 ### direct_erp.py
 - `class DirectERPTracker(BaseTracker)`：

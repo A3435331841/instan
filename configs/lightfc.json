@@ -1,0 +1,21 @@
+{
+  "tracker": "lightfc_onnx",
+  "backbone_path": "models/lightfc_backbone.onnx",
+  "tracking_path": "models/lightfc_tracking.onnx",
+  "search_size": 256,
+  "search_factor": 4.0,
+  "template_size": 128,
+  "template_factor": 2.0,
+  "patch_size": 255,
+  "sr_ratio": 3.0,
+  "sr_min_fov": 20.0,
+  "lost_score": 0.25,
+  "lost_psr": 3.0,
+  "lost_apce": 0.5,
+  "redetect_interval": 3,
+  "max_lost_frames": 1000000,
+  "search_scale": 2.0,
+  "lr": 0.02,
+  "hp_sigma": 0.0,
+  "refine": false
+}

@@ -1,12 +1,12 @@
 # panotrack —— 影石全景视频智能跟踪赛道 · 360° ERP 实时单目标跟踪原型
 
-> **项目状态**：Stage 2 已完成，Stage 3 官方数据对接中。当前推荐方案：**Direct ERP Tracker**（直接在全帧 ERP 上运行 VitTrack，绕过 BFoV 框架）。
+> **项目状态**：Stage 3 进行中，官方 120 序列测试集已下载对接。当前推荐方案：**LightFC**（onnxruntime 双子图，全帧跟踪，CPU 实时，先进水平 AUC 0.618）。
 
 武汉大学 4 人学生队参赛作品。面向 360° ERP（等距柱状投影）全景视频的实时单目标跟踪：
 **球面状态层预测 → tangent 局部切图 → 轻量跟踪器 → 置信度判丢 → 逐级扩大 FoV 重试 → 全局重检测**，
 最终以 Docker 镜像形式断网自包含提交。
 
-运行环境：Python 3.12，仅依赖 **numpy / Pillow / scipy**（禁止 cv2、torch、yaml、pytest）。
+运行环境：Python 3.12，生产仅依赖 **numpy / Pillow / scipy + onnxruntime**（禁止 cv2、torch、yaml、pytest；torch 仅本地 lightfc_cpu 验证用）。
 
 ---
 
@@ -17,9 +17,12 @@
 | Stage 1 | ✅ 完成 | BFoV 几何模块、NCC 跟踪器、合成数据生成、基础 pipeline |
 | Stage 2 | ✅ 完成 | 集成 VitTrack、全局重检测 v2、自适应 patch_size、状态阻尼 |
 | Stage 2 验证 | ✅ 完成 | 发现 BFoV 框架漂移问题；Direct ERP 方案 AUC 0.26 / FPS 155 |
-| Stage 3 | 🔄 进行中 | 官方 120 序列测试集对接、Docker 离线部署、 vittrack_onnx 生产化 |
+| Stage 3 | 🔄 进行中 | 官方 120 序列下载完成、LightFC 接入(先进水平)、ONNX 生产化、Docker 部署就绪 |
 
-**关键发现**：BFoV 框架的恒定角速度状态预测会累积误差，到第 7-8 帧时完全漂移。Direct ERP 方案（绕过 BFoV）在精度和速度上均显著优于传统框架。
+**关键发现**：BFoV 框架的恒定角速度状态预测会累积误差，到第 7-8 帧时完全漂移。
+Direct ERP 方案（绕过 BFoV）在精度和速度上均显著优于传统框架；
+进一步接入 LightFC 后，代表序列全帧平均 **AUC 0.618 / SR@0.5 0.749**（先进水平），
+CPU 实时约 10 FPS（纯模型推理 38 FPS，评测瓶颈在 4K JPEG 解码）。
 
 ---
 
@@ -304,6 +307,13 @@ docker run --rm --platform linux/amd64 \
   -v /path/to/data:/data panotrack:latest \
   --frames /data/frames --init /data/init.txt --out /data/results.txt \
   --config /app/configs/default.json
+
+# 用 LightFC(推荐,先进水平)评测:
+#   configs/lightfc.json -> tracker=lightfc_onnx(双子图 ONNX,CPU 实时)
+docker run --rm --platform linux/amd64 \
+  -v /path/to/data:/data panotrack:latest \
+  --frames /data/frames --init /data/init.txt --out /data/results.txt \
+  --config /app/configs/lightfc.json
 ```
 
 镜像正式 `ENTRYPOINT` 为 `python -m panotrack.cli`。辅助脚本
@@ -335,25 +345,42 @@ docker run --rm -i --entrypoint /entrypoint.sh panotrack:latest trax < cmds.txt
 
 ---
 
-## LightFC 接入指南
+## LightFC 接入指南（已接入，当前推荐方案）
 
-架构上 LightFC 作为**局部跟踪器**接入（替换 NCC），球面状态层与重检测逻辑不变：
+LightFC 已作为**全帧跟踪器**接入（同 Direct ERP 思路，不走 BFoV 切图），
+代表序列全帧评测平均 **AUC 0.618 / SR@0.5 0.749 / CPU 约 10 FPS**（先进水平）。
 
-1. **实现接口**：新建 `panotrack/trackers/lightfc.py`，实现
-   `class LightFCTracker(BaseTracker)`，遵守 `init(image, bbox)` /
-   `update(image) -> {'bbox', 'score', 'psr', 'apce'}` 契约
-   （image 为局部透视切图 (H,W,3) uint8，非全景图）。
-2. **注册工厂**：在 `panotrack/trackers/factory.py` 的 `create_tracker`
-   中注册 `name='lightfc'`。当前契约行为：`create_tracker('lightfc')`
-   抛出 `NotImplementedError`，提示"待接入 LightFC 深度学习模型
-   （需 torch/onnxruntime），接口已预留"——接入时替换为真实构造。
-3. **打开配置**：`configs/default.json` 中 `"tracker"` 改为 `"lightfc"`，
-   按需增加 LightFC 专属键（模型路径、输入尺寸等）。
-4. **依赖与打包**：深度推理依赖（torch / onnxruntime）超出当前
-   numpy/Pillow/scipy 白名单，需评审后加入 `requirements.txt` 并在
-   `docker/Dockerfile` 中预装模型权重（COPY 进镜像，保持断网自包含）。
-5. **验收**：LightFC 版本须通过同一套测试与 demo 验收指标
-  （equator/crossing SR@0.5 ≥ 0.9 等）。
+### 生产部署路径（onnxruntime，推荐）
+
+1. **模型文件**（不入 Git，需自行准备，放 `models/`）：
+   - `models/lightfc_backbone.onnx`（模板特征子图，2.2MB）
+   - `models/lightfc_tracking.onnx`（跟踪子图，12.7MB）
+   - 生成方式：本地有 torch 时运行 `tools_local/export_lightfc_onnx.py`
+     （需先按下方"本地验证路径"获取权重）；或从队友处拷贝两个 ONNX。
+2. **配置**：`configs/lightfc.json`（`tracker: "lightfc_onnx"` + 两个模型路径）。
+3. **一键评测**：`python scripts/eval_360vot.py --config configs/lightfc.json
+   --data data360 --seqs 0036,0116 --downscale 0.5`
+   （`eval_360vot.py` 对 lightfc/direct_erp 类全帧跟踪器走直连 OPE 路径，
+   不再经 BFoV 切图与全局重检测）。
+4. **CLI / Docker**：`python -m panotrack.cli --config configs/lightfc.json`；
+   Dockerfile 已 COPY `models/`，镜像断网自包含。
+
+### 本地验证路径（torch CPU）
+
+1. 克隆 LightFC 官方仓库到 `tools_local/lightfc`（已 .gitignore，不入库）：
+   `git clone --depth 1 https://github.com/LiYunfengLYF/LightFC.git tools_local/lightfc`
+2. 下载预训练权重 `outputs_lightfc.zip`（Google Drive 链接见官方 README），
+   解压出 `lightfc_ep0400.pth.tar` 放到 `output/checkpoints/.../`。
+3. 依赖：`pip install torch==2.2.2 --index-url https://download.pytorch.org/whl/cpu`
+   + `torchvision==0.17.2` + `numpy<2` + `timm`（lightfc_cpu 路径用）。
+4. 使用 `panotrack/trackers/lightfc_cpu.py`（`tracker: "lightfc_cpu"`）。
+
+### 说明
+
+- 两个封装均对齐 `BaseTracker` 契约（init/update + 状态代理字段），
+  输入为 **ERP 全帧**，搜索区裁剪水平回绕处理 360° 跨界。
+- 全帧跟踪器在 `eval_360vot.py` 中走 `_eval_full_frame` 直连路径；
+  若接入 PanoTracker（BFoV 框架）则语义不匹配，不建议混用。
 
 ---
 

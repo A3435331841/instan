@@ -22,6 +22,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY panotrack ./panotrack
 COPY configs ./configs
+# LightFC/VitTrack ONNX 模型打进镜像(断网自包含;评测机零网络访问)
+COPY models ./models
 COPY docker/entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 

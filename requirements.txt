@@ -1,5 +1,11 @@
 # -*- coding: utf-8 -*-
-"""panotrack 运行依赖（Python 3.12，仅 numpy / Pillow / scipy）+ onnxruntime（Docker构建期安装）"""
+"""panotrack 运行依赖(Python 3.12)。
+
+生产推理仅需 numpy / Pillow / scipy + onnxruntime:
+  - LightFC ONNX 双子图(models/lightfc_backbone.onnx + lightfc_tracking.onnx)
+  - VitTrack ONNX(models/object_tracking_vittrack_2023sep.onnx)
+不依赖 torch(仅本地验证用 lightfc_cpu.py 才需要,不进 Docker)。
+"""
 numpy>=1.26.0
 Pillow>=10.0.0
 scipy>=1.11.3

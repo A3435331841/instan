@@ -1,0 +1,17 @@
+{
+  "tracker": "direct_erp",
+  "model_path": "models/object_tracking_vittrack_2023sep.onnx",
+  "patch_size": 255,
+  "sr_ratio": 6.0,
+  "sr_min_fov": 20.0,
+  "lost_score": 0.25,
+  "lost_psr": 3.0,
+  "lost_apce": 0.5,
+  "redetect_interval": 3,
+  "max_lost_frames": 1000000,
+  "template_size": 127,
+  "search_scale": 2.0,
+  "lr": 0.02,
+  "hp_sigma": 3.0,
+  "refine": false
+}

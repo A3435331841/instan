@@ -38,6 +38,57 @@ def _log(msg):
     print(msg, file=sys.stderr, flush=True)
 
 
+def _eval_full_frame(seq_dir, name, out_dir, downscale, max_frames, config,
+                     width, first_frame, first_gt, norm_x):
+    """全帧跟踪器(lightfc/direct_erp)直接 OPE 评测(私有)。
+
+    用 factory.create_tracker 创建跟踪器,init 全帧 + 逐帧 update,
+    与 eval_sequence 相同的落盘与返回格式。
+    """
+    from panotrack.trackers.factory import create_tracker
+
+    cfg = dict(config or {})
+    tracker_kwargs = {k: v for k, v in cfg.items()
+                      if k not in ('tracker', 'patch_size', 'sr_ratio',
+                                   'sr_min_fov', 'lost_score', 'lost_psr',
+                                   'lost_apce', 'redetect_interval',
+                                   'max_lost_frames', 'hp_sigma', 'refine')}
+    tracker = create_tracker(cfg.get('tracker', 'lightfc_onnx'), **tracker_kwargs)
+
+    it = iter_vot360_sequence(seq_dir, downscale=downscale, max_frames=max_frames)
+    _, first_frame, first_gt = next(it)
+    tracker.init(first_frame, norm_x(first_gt))
+    preds = [norm_x(first_gt)]
+    gts = [norm_x(first_gt)]
+    t0 = time.perf_counter()
+    for _, frame, row in it:
+        out = tracker.update(frame)
+        preds.append(tuple(float(v) for v in out['bbox']))
+        gts.append(norm_x(row))
+    elapsed = time.perf_counter() - t0
+    n = len(preds)
+    fps = (n - 1) / max(elapsed, 1e-9) if n > 1 else 0.0
+
+    m = ope_evaluate(np.asarray(preds), np.asarray(gts, dtype=float), width)
+
+    dst = Path(out_dir) / name
+    dst.mkdir(parents=True, exist_ok=True)
+    with open(dst / 'results.txt', 'w', encoding='utf-8') as f:
+        for b in preds:
+            f.write(f'{b[0]:.2f},{b[1]:.2f},{b[2]:.2f},{b[3]:.2f}\n')
+    metrics = {
+        'sequence': name, 'n_frames': n,
+        'width': int(width), 'height': int(first_frame.shape[0]),
+        'downscale': float(downscale),
+        'sr': m['sr'], 'sr_dual': m['sr_dual'],
+        'auc': m['auc'], 'auc_dual': m['auc_dual'], 'fps': fps,
+        'n_lost': 0, 'n_recovered': 0,
+    }
+    with open(dst / 'metrics.json', 'w', encoding='utf-8') as f:
+        json.dump(metrics, f, ensure_ascii=False, indent=2)
+    return metrics
+
+
 def eval_sequence(seq_dir, out_dir, downscale=1.0, max_frames=None, config=None):
     """单序列 OPE 评测，并落盘 results.txt 与 metrics.json。
 
@@ -62,6 +113,14 @@ def eval_sequence(seq_dir, out_dir, downscale=1.0, max_frames=None, config=None)
         b = [float(v) for v in box]
         b[0] = b[0] % width
         return tuple(b)
+
+    # 全帧跟踪器(lightfc_onnx / lightfc_cpu / direct_erp)直接跑 OPE，
+    # 不走 PanoTracker 的 BFoV 切图 + 全局重检测框架。
+    tracker_name = (config or {}).get('tracker', 'ncc')
+    _FULL_FRAME = ('lightfc_onnx', 'lightfc_cpu', 'direct_erp')
+    if str(tracker_name).lower() in _FULL_FRAME:
+        return _eval_full_frame(seq_dir, name, out_dir, downscale, max_frames,
+                                config, width, first_frame, first_gt, _norm_x)
 
     tracker = PanoTracker(config)
     tracker.init(first_frame, _norm_x(first_gt))

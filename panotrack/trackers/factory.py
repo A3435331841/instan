@@ -7,7 +7,8 @@
   - 'vittrack_cv2': VitTrack via cv2.TrackerVit (本地Windows验证用,非部署级)
   - 'vittrack_onnx': VitTrack via onnxruntime (生产部署,需docker linux)
   - 'direct_erp': 直接ERP跟踪，绕过BFoV框架 (推荐用于小目标和漂移敏感场景)
-  - 'lightfc': LightFC(预留)
+  - 'lightfc_onnx': LightFC via onnxruntime 双子图 (生产部署,CPU 实时)
+  - 'lightfc_cpu': LightFC via torch CPU (本地验证用)
 """
 from .base import BaseTracker
 from .ncc import NCCTracker
@@ -45,9 +46,28 @@ def create_tracker(name='ncc', **kwargs):
     if key == 'direct_erp':
         # 直接 ERP 跟踪，绕过 BFoV 框架，避免漂移
         return DirectERPTracker(**kwargs)
+    if key == 'lightfc_onnx':
+        # LightFC via onnxruntime(双子图):生产部署,CPU 实时,无 torch 依赖
+        try:
+            from .lightfc_onnx import LightFCONNX
+            return LightFCONNX(**kwargs)
+        except Exception as e:
+            print(f'[Factory] lightfc_onnx init failed, fallback to ncc_v2: {e}',
+                  file=__import__('sys').stderr)
+            return NCCTrackerV2(**kwargs)
+    if key == 'lightfc_cpu':
+        # LightFC via torch CPU:本地验证用
+        try:
+            from .lightfc_cpu import LightFCTracker
+            return LightFCTracker(**kwargs)
+        except Exception as e:
+            print(f'[Factory] lightfc_cpu init failed, fallback to ncc_v2: {e}',
+                  file=__import__('sys').stderr)
+            return NCCTrackerV2(**kwargs)
     if key == 'lightfc':
         raise NotImplementedError(
-            "待接入 LightFC 深度学习模型（需 torch/onnxruntime），接口已预留")
+            "请用 'lightfc_onnx'(onnxruntime 生产)或 'lightfc_cpu'(torch 本地)")
     raise ValueError(
-        f"未知跟踪器名称: {name!r}，当前可用: 'ncc', 'ncc_v2', 'vittrack_onnx', 'vittrack_cv2', 'direct_erp'"
+        f"未知跟踪器名称: {name!r}，当前可用: 'ncc', 'ncc_v2', 'vittrack_onnx', "
+        f"'vittrack_cv2', 'direct_erp', 'lightfc_onnx', 'lightfc_cpu'"
     )
