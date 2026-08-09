@@ -219,6 +219,11 @@ def fit(X, y, n_experts=3, base_dim=1024, rank=8, hidden=32,
         if verbose and (ep % 50 == 0 or ep == 1 or ep == epochs):
             acc = (model.gating(g).argmax(-1) == lb).float().mean().item()
             print(f'[epoch {ep}/{epochs}] loss={avg:.4f} gating_acc={acc:.3f}')
+    # ``fit`` is an offline training/export helper.  Return a CPU model so
+    # callers can immediately validate or export it with CPU descriptors,
+    # regardless of whether training selected CUDA.  This also releases the
+    # training graph's GPU allocation before the next experiment starts.
+    model = model.cpu()
     return model, history
 
 

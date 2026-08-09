@@ -100,6 +100,7 @@ def test_export_roundtrip_equals_torch():
     X, y, _ = synth_geometry_data(n=64, seed=2, n_experts=3)
     model, _ = fit(X, y, n_experts=3, base_dim=32, rank=2, epochs=5,
                    lr=1e-2, seed=0, verbose=False)
+    check('fit 返回可直接导出的 CPU 模型', next(model.parameters()).device.type == 'cpu')
     params = model.export_router_params()
     router = GeometryRouter(n_experts=3, params=params)
 
