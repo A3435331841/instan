@@ -22,7 +22,7 @@
 
 | 交付物 | 路径 | SHA-256 |
 | --- | --- | --- |
-| 中文最终报告 | `D:/instan/pano360/reports/STAGE_RESULTS_2026-08-09.md` | `911a2622d0603d3e37a267045b07de7e87858eac69119435722c120e9bbb4512` |
+| 中文最终报告 | `D:/instan/pano360/reports/STAGE_RESULTS_2026-08-09.md` | `9e41741ed0afd8e46ca75889dba0201819ecbce2e10d7ffda751f2614fa5ebd4` |
 | 四架构汇总 JSON | `D:/instan/pano360/reports/results/architecture_bakeoff_0001_0120.json` | `f01b0fa771ff01301ddd4c6e62c4f28a26d3385b4da2535393e5b9a70d274b2a` |
 | UETrack JSON | `D:/instan/pano360/reports/results/erpwrap_ablation_0001_0120_bakeoff.json` | `d49046a7a0395c48aae451f584e8f729244f0ead6e286dc29f00055d9dc0a333` |
 | UETrack CSV | `D:/instan/pano360/reports/results/erpwrap_ablation_0001_0120_scores.csv` | `b5e99afd9ce2322e7d9b3104e79dd5850ca8a76842e06618e18a972d41fa3953` |
@@ -63,3 +63,10 @@
 - 预测框与 GT 行数严格匹配；首帧只初始化；普通 IoU 与双 IoU 均已计算。
 - LightFC 0069 的异常裁剪问题已修复并从该序列重跑；最终 120 条无 OOM 退出。
 - 密码、token 和私有缓存未进入 Git 跟踪文件。
+-
+## 融合架构筛选证据
+
+- 融合器：`D:/instan/pano360/scripts/fuse_external_results.py`（SHA-256 `545e6bcd85728c0bca6a80381f69d6805d799a7f05ed725d9271deeab5058fe3`）
+- 120 条周期路由结果：`D:/instan/pano360/reports/results/fusion_m5_score/bakeoff.json`（`9f8baf6591b1f5bbed9417b8e0edf75aa50d316b046862bebea7e484f1d59d27`）和 `scores.csv`（`e4dfebe92d4b2615470b004aeb61de9c4e074bc245c1a3a11087bb51a055e6d7`）；AUC `0.5792135073`、SR `0.6531941586`。
+- 10 条 ODTrack IoU-head 置信度试跑：`D:/instan/pano360/reports/results/fusion_conf_10_score/`；AUC `0.5344530`、SR `0.5952625`。
+- 单元测试：`D:/instan/pano360/tests/test_external_fusion.py`（SHA-256 `6a2ebc7b912d16bc09da657de21109fc1b591d342ef8a94a6705ee7ea19c82fc`）。

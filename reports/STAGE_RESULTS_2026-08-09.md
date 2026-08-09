@@ -92,3 +92,11 @@ GitHub：
 - ODTrack：GPU0 60/60 + GPU1 60/60，合并后 120/120 条，CSV 120 行，JSON `n_sequences=120`。
 - 所有原始结果归档和评分 JSON/CSV 均已传回本地；原始归档不放入 Git，评分证据和中文报告会提交 GitHub。
 - 密码、token 和私有缓存未进入 Git 跟踪文件。
+-
+## 新版本：周期接缝置信度融合筛选
+
+新增 `scripts/fuse_external_results.py` 融合器：以 ODTrack 为高精度主专家、UETrack ERP-wrap 为接缝恢复专家、LightFC 为低成本 scout；路由只使用当前和历史预测框，不读取真值，并加入周期中心距离、尺度突变、专家分歧、滞回和可选 ODTrack IoU-head 置信度。
+
+- 120 条全量后处理筛选（margin=5，LightFC penalty=8）：AUC `0.5792135073`，SR `0.6531941586`，与 ODTrack 严格相同，未产生可宣称的提升；证据在 `reports/results/fusion_m5_score/`。
+- 10 条真实 ODTrack IoU-head 置信度试跑：实现了 `confidence.txt` 输出，并测试阈值 `0.15–0.30`、连续低置信度滞回。最佳仅为万分级波动，扩大切换会明显伤害 AUC/SR；10 条融合结果为 AUC `0.5344530`、SR `0.5952625`，证据在 `reports/results/fusion_conf_10_score/`。
+- 结论：当前结果流中 ODTrack 已经是强主专家，简单框平均、周期切换和低置信度硬切换都不能可靠超过 `0.5792/0.6532`。本阶段不虚报“已超越”；下一步若要真正突破，需要导出并校准逐帧响应图或重新训练接缝感知/置信度蒸馏模型，而不是继续在已有四元框上调阈值。
