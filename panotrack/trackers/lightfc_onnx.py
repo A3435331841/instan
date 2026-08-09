@@ -42,14 +42,17 @@ class LightFCONNX(BaseTracker):
     update(image) -> {'bbox','score','psr','apce'}。
     """
 
+    input_space = 'erp_full'
+
     def __init__(self, backbone_path, tracking_path, search_size=256,
                  search_factor=4.0, template_size=128, template_factor=2.0,
-                 **kwargs):
+                 backend='cpu', **kwargs):
         """创建 LightFC ONNX 跟踪器。
 
         参数: backbone_path —— lightfc_backbone.onnx;tracking_path ——
               lightfc_tracking.onnx;search_size/search_factor —— 搜索区尺寸与
-              裁剪倍率;template_size/template_factor —— 模板尺寸与裁剪倍率。
+              裁剪倍率;template_size/template_factor —— 模板尺寸与裁剪倍率;
+              backend —— 'cpu' 或 'cuda'(onnxruntime provider)。
         返回: None
         """
         del kwargs
@@ -62,10 +65,13 @@ class LightFCONNX(BaseTracker):
         self.feat_sz = self.search_size // 16
         self.output_window = _hann2d(np.array([self.feat_sz, self.feat_sz]),
                                      centered=True)
+        providers = (['CUDAExecutionProvider', 'CPUExecutionProvider']
+                     if str(backend).lower() == 'cuda'
+                     else ['CPUExecutionProvider'])
         self._sess_b = ort.InferenceSession(self.backbone_path,
-                                            providers=['CPUExecutionProvider'])
+                                            providers=providers)
         self._sess_t = ort.InferenceSession(self.tracking_path,
-                                            providers=['CPUExecutionProvider'])
+                                            providers=providers)
         self.state = None
         self.z_feat = None
         self._last_score = 1.0
@@ -90,8 +96,11 @@ class LightFCONNX(BaseTracker):
         crop_sz = max(crop_sz, 2)
         cx, cy = x + 0.5 * w, y + 0.5 * h
         half = crop_sz // 2
-        cols = np.mod(np.arange(cx - half, cx - half + crop_sz), W).astype(np.int64)
-        rows = np.arange(cy - half, cy - half + crop_sz)
+        # 用整数起点构造 arange,避免浮点误差导致长度多1(cx/cy 为浮点时)
+        start_col = int(np.round(cx - half))
+        start_row = int(np.round(cy - half))
+        cols = np.mod(np.arange(start_col, start_col + crop_sz), W).astype(np.int64)
+        rows = np.arange(start_row, start_row + crop_sz)
         rows_c = np.clip(rows, 0, H - 1).astype(np.int64)
         out = np.zeros((crop_sz, crop_sz, 3), dtype=np.uint8)
         valid = (rows >= 0) & (rows < H)

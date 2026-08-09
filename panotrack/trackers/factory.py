@@ -17,6 +17,29 @@ from .vittrack_onnx import VitTrackONNX
 from .direct_erp import DirectERPTracker
 
 
+_INPUT_SPACE = {
+    # 局部透视图（tangent/eBFoV 切图）跟踪器：可被 PanoTracker 直接使用
+    'ncc': 'local_patch',
+    'ncc_v2': 'local_patch',
+    'vittrack_onnx': 'local_patch',
+    'vittrack_cv2': 'local_patch',
+    # 全帧 ERP 跟踪器：必须经 full-frame runner（eval_360vot/CLI）
+    'direct_erp': 'erp_full',
+    'lightfc_onnx': 'erp_full',
+    'lightfc_cpu': 'erp_full',
+}
+
+
+def get_tracker_input_space(name):
+    """返回跟踪器声明的输入空间（GRT-360 Commit 2）。
+
+    参数: name 跟踪器名称（大小写不敏感）。
+    返回: 'local_patch' 或 'erp_full'。
+    说明: 未知名称返回 None，不抛异常（供 guard 做友好提示）。
+    """
+    return _INPUT_SPACE.get((name or '').lower())
+
+
 def create_tracker(name='ncc', **kwargs):
     """按名称创建局部透视图单目标跟踪器。"""
     key = (name or '').lower()

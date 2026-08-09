@@ -133,10 +133,10 @@ class NCCTracker(BaseTracker):
         self.lr = float(lr)
         self.search_scale = float(search_scale)
         self.template_size = int(template_size)
-        # 逐轴尺度搜索点集（十字形）：(f,1) 与 (1,f)，支持目标长宽比变化
-        # （全景极区目标在切图域会被拉成扁弧，各向同性尺度无法贴合）
-        self._scale_pairs = tuple(sorted(
-            {(f, 1.0) for f in self.scales} | {(1.0, f) for f in self.scales}))
+        # 经典 NCC 保底路径采用各向同性多尺度搜索。默认 3 个尺度只需 3 组
+        # FFT；极区非均匀形变交给全景几何/主模型处理，避免保底 tracker
+        # 为 2% 的轴向尺度差付出 5 组 FFT 的实时性代价。
+        self._scale_pairs = tuple((f, f) for f in self.scales)
         # 搜索图边长取奇数，使响应图零偏移恰好落在整数像素（默认 255）
         ss = int(round(self.template_size * self.search_scale))
         self.search_size = ss if ss % 2 == 1 else ss + 1
@@ -161,6 +161,7 @@ class NCCTracker(BaseTracker):
         self._h = 1.0
         self._tmpl = None       # 零均值单位范数模板 (template_size, template_size)
         self._tmpl_hat = None   # 模板 FFT 共轭缓存
+        self._update_count = 0  # 模板隔帧更新，减少非主模型路径的 FFT 开销
         self._ready = False
 
     def init(self, image, bbox):
@@ -188,6 +189,7 @@ class NCCTracker(BaseTracker):
             p = p / n
         self._tmpl = p.astype(np.float32)
         self._tmpl_hat = np.conj(np.fft.rfft2(self._tmpl, (self._fft_h, self._fft_w)))
+        self._update_count = 0
         self._ready = True
 
     def update(self, image):
@@ -202,7 +204,7 @@ class NCCTracker(BaseTracker):
         H, W = gray.shape
         base_w = self._w * (1.0 + self.context) * self.search_scale
         base_h = self._h * (1.0 + self.context) * self.search_scale
-        # 逐轴多尺度搜索：x/y 方向独立缩放裁剪窗口，使目标长宽比可独立演化
+        # 各向同性多尺度搜索（NCC 为保底路径，优先保证确定性与实时性）
         best = None
         for sx, sy in self._scale_pairs:
             pw = base_w * sx
@@ -234,7 +236,8 @@ class NCCTracker(BaseTracker):
         psr = _psr(resp, r, c)
         apce = _apce(resp)
         # 门控模板更新：低置信帧冻结模板
-        if score >= _UPDATE_THR:
+        self._update_count += 1
+        if score >= _UPDATE_THR and self._update_count % 2 == 0:
             self._update_template(gray)
         return {'bbox': (self._cx - self._w / 2.0, self._cy - self._h / 2.0,
                          self._w, self._h),

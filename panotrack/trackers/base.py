@@ -8,7 +8,14 @@ class BaseTracker(ABC):
 
     实现类必须线程无关、无全局状态；init/update 均在局部透视图坐标系下进行，
     不感知 ERP 全景与跨界回绕（由上层 pipeline 负责）。
+
+    input_space 声明跟踪器期望的输入空间（GRT-360 Commit 2）：
+      'local_patch' —— 局部 tangent/eBFoV 切图（默认，向后兼容）；
+      'erp_full'    —— 全帧 ERP 全景（如 LightFC / DirectERP，需经 full-frame runner）。
+    PanoTracker 只接受 'local_patch'；'erp_full' 必须走 eval_360vot/CLI 全帧路径。
     """
+
+    input_space = 'local_patch'  # 默认向后兼容
 
     @abstractmethod
     def init(self, image, bbox):

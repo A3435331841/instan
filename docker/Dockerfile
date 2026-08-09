@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # panotrack —— 360° ERP 全景视频实时单目标跟踪（赛事提交镜像）
 #
 # 断网自包含原则：构建期一次性安装全部依赖并 COPY 源码，运行期零网络访问。
@@ -8,7 +7,9 @@
 #   docker run --rm --platform linux/amd64 \
 #     -v /path/to/data:/data panotrack:latest \
 #     --frames /data/frames --init /data/init.txt --out /data/results.txt
-FROM python:3.12-slim
+# 注：不使用 # syntax 远程指令（避免构建期拉取 docker.eiffel 前端）；
+# 基础镜像用本地已缓存的 python:3.12-slim-bookworm（等价 python:3.12-slim）。
+FROM python:3.12-slim-bookworm
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

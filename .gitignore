@@ -10,6 +10,8 @@ models/
 data360/
 !data360/README_HF.md
 !data360/360vots-info.csv
+*.tgz
+*.tar.gz
 
 # ============================
 # 运行输出

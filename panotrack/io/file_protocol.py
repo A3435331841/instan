@@ -43,11 +43,28 @@ def _read_init(init_file):
     return tuple(float(v) for v in parts)
 
 
-def _create_pano_tracker(config):
-    """延迟导入并创建 PanoTracker（契约模块 E，集成阶段实现）。
+def _create_tracker(config):
+    """按输入空间创建全帧 tracker 或 BFoV PanoTracker。
 
-    延迟导入保证模块 E 尚未落地时，本模块仍可被正常导入与单元测试。
+    ``lightfc_onnx`` / ``lightfc_cpu`` / ``direct_erp`` 直接消费 ERP 全帧；
+    NCC 等局部 tracker 仍由 PanoTracker 负责切图和全景几何。未知 tracker
+    名称保留交给 PanoTracker，便于协议单测注入 fake tracker。
     """
+    cfg = dict(config or {})
+    tracker_name = cfg.get('tracker', 'ncc')
+    from panotrack.trackers.factory import create_tracker, get_tracker_input_space
+
+    if get_tracker_input_space(tracker_name) == 'erp_full':
+        controller_only = {
+            'tracker', 'patch_size', 'sr_ratio', 'sr_min_fov',
+            'lost_score', 'lost_psr', 'lost_apce', 'redetect_interval',
+            'max_lost_frames', 'hp_sigma', 'refine', 'motion_prior',
+            'mp_lambda', 'mp_sigma_base', 'mp_sigma_per_speed',
+        }
+        kwargs = {k: v for k, v in cfg.items() if k not in controller_only}
+        return create_tracker(tracker_name, **kwargs)
+
+    # 延迟导入保证 --help 和协议层单测不依赖 pipeline 初始化。
     try:
         from panotrack.pipeline.pipeline import PanoTracker
     except Exception as exc:  # ImportError 或模块 E 内部错误
@@ -56,6 +73,10 @@ def _create_pano_tracker(config):
             '（契约模块 E 尚未实现或其实现有误）'
         ) from exc
     return PanoTracker(config)
+
+
+# 向后兼容旧的内部测试/脚本名称。
+_create_pano_tracker = _create_tracker
 
 
 def run_file_protocol(frames_dir, init_file, out_file, config=None):
@@ -75,7 +96,7 @@ def run_file_protocol(frames_dir, init_file, out_file, config=None):
     """
     paths = _list_frames(frames_dir)
     bbox0 = _read_init(init_file)
-    tracker = _create_pano_tracker(config)
+    tracker = _create_tracker(config)
 
     print(f'[file_protocol] 共 {len(paths)} 帧, init={bbox0}', file=sys.stderr)
     t0 = time.perf_counter()
@@ -88,7 +109,7 @@ def run_file_protocol(frames_dir, init_file, out_file, config=None):
             else:
                 res = tracker.update(frame)
                 bbox = res['bbox']
-                print(f'[file_protocol] 帧 {i}: status={res.get("status")} '
+                print(f'[file_protocol] 帧 {i}: status={res.get("status", "ok")} '
                       f'score={res.get("score")}', file=sys.stderr)
             x, y, w, h = (float(v) for v in bbox)
             fout.write(f'{x:.2f},{y:.2f},{w:.2f},{h:.2f}\n')

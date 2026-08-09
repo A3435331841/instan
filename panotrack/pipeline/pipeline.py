@@ -17,13 +17,15 @@ from panotrack.geometry.projection import RemapCache, remap_image
 from panotrack.geometry.sphere import (
     wrap_lon, delta_lon, lonlat_to_unit, unit_to_lonlat, _tangent_frame, _offset_dirs,
 )
-from panotrack.trackers.factory import create_tracker
+from panotrack.geometry.motion_prior import SoftS2MotionPrior
+from panotrack.trackers.factory import create_tracker, get_tracker_input_space
 
 from .state import SphericalState
 from .redetect import GlobalRedetector
 from .redetect_v2 import GlobalRedetectorV2
 
-# 缺省配置与 configs/default.json 完全一致（契约）
+# PanoTracker(BFoV 切图框架)内置缺省。全帧跟踪器(lightfc_onnx 等)在
+# BFoV 下语义不匹配,应经 eval_360vot/CLI 用 configs/default.json 跑全帧路径。
 DEFAULT_CONFIG = {
     'tracker': 'ncc',
     'patch_size': 255,
@@ -39,6 +41,10 @@ DEFAULT_CONFIG = {
     'lr': 0.02,
     'hp_sigma': 3.0,
     'refine': True,
+    'motion_prior': False,   # GRT-360 Soft S² motion prior（feature-flag）
+    'mp_lambda': 1.0,
+    'mp_sigma_base': 15.0,
+    'mp_sigma_per_speed': 0.5,
 }
 
 _QUANT = 2.0          # 与 RemapCache 量化键一致的角度栅格（度）
@@ -319,6 +325,13 @@ class PanoTracker:
         self._state = None
         self._patch_bfov = None   # 当前切图窗口（tracker 局部坐标所在窗口）
         self._template = None     # 全局重检测模板 (img, (w_erp, h_erp))
+        # GRT-360 Soft S² motion prior（feature-flag 'motion_prior'）
+        self._motion_prior = None
+        if bool(cfg.get('motion_prior', False)):
+            self._motion_prior = SoftS2MotionPrior(
+                lambda_=float(cfg.get('mp_lambda', 1.0)),
+                sigma_base=float(cfg.get('mp_sigma_base', 15.0)),
+                sigma_per_speed=float(cfg.get('mp_sigma_per_speed', 0.5)))
         redetector_type = cfg.get('redetector', 'v1')
         if redetector_type == 'v2':
             self._redetector = GlobalRedetectorV2(
@@ -414,6 +427,14 @@ class PanoTracker:
                     fov_h=max(lw / ps * cut.fov_h, 1e-3),
                     fov_v=max(lh / ps * cut.fov_v, 1e-3))
 
+    def _local_bbox_dir(self, local_bbox, cut):
+        """局部框中心对应的单位球方向 (3,)（供 motion prior 一致性判定）。"""
+        ps = getattr(self, '_adaptive_patch_size', int(self._cfg['patch_size']))
+        lx, ly, lw, lh = (float(v) for v in local_bbox)
+        vx, vy, vz = _local_to_dir(np.array([lx + lw / 2.0]), np.array([ly + lh / 2.0]),
+                                   cut, ps, ps)
+        return np.array([vx[0], vy[0], vz[0]], dtype=np.float64)
+
     # ------------------------------------------------------------ 契约接口
 
     def init(self, frame, bbox):
@@ -440,11 +461,21 @@ class PanoTracker:
         else:
             ps = base_ps
         self._adaptive_patch_size = ps
-        self._tracker = create_tracker(cfg['tracker'], **{k: v for k, v in cfg.items()
+        tracker_name = cfg['tracker']
+        # GRT-360 Commit 2 input-space 守卫：PanoTracker 只接受局部切图跟踪器，
+        # 'erp_full' 跟踪器（LightFC/DirectERP）必须走 eval_360vot/CLI 全帧路径
+        if get_tracker_input_space(tracker_name) != 'local_patch':
+            raise ValueError(
+                f"PanoTracker(BFoV 切图框架)不支持 input_space='erp_full' 的跟踪器 "
+                f"{tracker_name!r}；请用 eval_360vot/CLI 全帧 runner 或改用 "
+                f"'ncc'/'ncc_v2' 等局部切图跟踪器")
+        self._tracker = create_tracker(tracker_name, **{k: v for k, v in cfg.items()
             if k not in ('tracker', 'patch_size', 'sr_ratio', 'sr_min_fov',
                          'lost_score', 'lost_psr', 'lost_apce',
                          'redetect_interval', 'max_lost_frames',
-                         'hp_sigma', 'refine')})
+                         'hp_sigma', 'refine',
+                         'motion_prior', 'mp_lambda', 'mp_sigma_base',
+                         'mp_sigma_per_speed')})
 
         tb = bfov_from_erp_bbox(*bbox, W, H)
         self._state = SphericalState(
@@ -478,6 +509,10 @@ class PanoTracker:
         cfg = self._cfg
         ps = getattr(self, '_adaptive_patch_size', int(cfg['patch_size']))
         pred = self._state.predict()
+        # Soft S² motion prior：预测单位球方向（供分数调制）
+        if self._motion_prior is not None:
+            px, py, pz = lonlat_to_unit(float(pred.lon), float(pred.lat))
+            pred_vec = np.array([px, py, pz], dtype=np.float64)
 
         # 局部跟踪 + 逐级扩大 FoV 重试
         accepted = None
@@ -488,13 +523,17 @@ class PanoTracker:
             self._migrate_tracker(cut)
             hp = _highpass(patch, cfg['hp_sigma'])
             res = self._tracker.update(hp)
+            # GRT-360：开启时用 S² 运动先验软调制得分（feature-flag）
+            if self._motion_prior is not None:
+                obs_vec = self._local_bbox_dir(res['bbox'], cut)
+                score, _ = self._motion_prior(float(res['score']), pred_vec,
+                                              obs_vec, self._state.angular_speed_deg)
+                res = dict(res)          # 浅拷贝，避免污染 tracker 内部返回
+                res['score'] = score
             last_res, last_cut = res, cut
             if self._confident(res):
                 accepted = (res, cut, hp)
                 break
-
-        # 主 tracker 不自信时，用 NCC backup tracker 做 fallback
-        backup_accepted = None
 
         if accepted is not None:
             res, cut, hp = accepted
@@ -516,22 +555,6 @@ class PanoTracker:
                 if len(self._score_history) > 30:
                     self._score_history.pop(0)
             return {'bbox': erp_bbox, 'score': float(res['score']),
-                    'status': status, 'fov': (cut.fov_h, cut.fov_v)}
-
-        if backup_accepted is not None:
-            res_b, cut, hp = backup_accepted
-            rb = res_b['bbox']
-            erp_bbox = _cap_box(_local_bbox_to_erp(rb, cut, ps, ps, W, H),
-                                self._last_good_size, W, H)
-            self._state.update(self._measured_bfov(rb, cut))
-            self._template = self._crop_template(frame, erp_bbox)
-            # 用 backup 结果重建主 tracker
-            self._tracker.init(hp, _erp_bbox_to_local(erp_bbox, cut, ps, ps, W, H))
-            status = 'recovered' if self._lost_count > 0 else 'ok'
-            self._lost_count = 0
-            self._last_fov = (cut.fov_h, cut.fov_v)
-            self._last_good_size = (erp_bbox[2], erp_bbox[3])
-            return {'bbox': erp_bbox, 'score': float(res_b['score']) * 0.8,
                     'status': status, 'fov': (cut.fov_h, cut.fov_v)}
 
         # 连续丢失：按间隔做全局重检测（ds=2 细分采样兼顾可分性与速度）
