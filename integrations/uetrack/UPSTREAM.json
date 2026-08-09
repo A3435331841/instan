@@ -1,0 +1,7 @@
+{
+  "repository": "https://github.com/kangben258/UETrack.git",
+  "commit": "fd13b0eaf16d51536008295f3b27807c69eaad50",
+  "parameter": "uetrack_base",
+  "checkpoint_filename": "uetrack_base.tar",
+  "checkpoint_sha256": "1d34778a41c553e3a5e17829d33df4a644f7c948b054a64f46e02fa99558b901"
+}
