@@ -1,7 +1,7 @@
-# GRT-360 stage results — 2026-08-09
+# GRT-360 final results — 2026-08-09
 
-This is a reproducible checkpoint, not the final 120-sequence result. The full
-dataset transfer and paired evaluation are still running.
+The 120-sequence paired evaluation is complete. This report records the exact
+protocol, final scores, validation boundary, and delivery locations.
 
 ## Immutable anchors
 
@@ -25,26 +25,23 @@ ordinary and dual IoU, SR@0.5, 21-point AUC, equal-weight macro average.
 UETrack is the selected backbone. LoRAT and ODTrack were not assigned fabricated
 scores: no usable pinned checkpoints were present in the handoff environment.
 
-## Seam-aware UETrack ablation (0001–0039)
+## Final seam-aware UETrack evaluation (0001–0120)
 
 The enhancement replaces horizontal black padding with ERP circular sampling
-and retains seam-crossing box extent. Vertical padding remains unchanged. It
-is opt-in for ablation runs and is the default in the final file protocol.
+and retains seam-crossing box extent. Vertical padding remains unchanged. The
+same strict scorer was run on all 120 sequences for both variants.
 
-| Variant | Sequences | Ordinary AUC | SR@0.5 | Observed FPS |
-| --- | ---: | ---: | ---: | ---: |
-| UETrack ERP wrap | 39 | 0.4988 | 0.5578 | 56.63 |
-| UETrack base | 39 | 0.4060 | 0.4397 | 62.39 |
-| Geometry soft fusion, best transition | 10 | 0.3535 | 0.3767 | not comparable |
+| Variant | Sequences | Ordinary AUC | Dual AUC | SR@0.5 | Dual SR | Observed FPS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| UETrack ERP wrap | 120 | 0.5143 | 0.5163 | 0.5776 | 0.5798 | 57.16 |
+| UETrack base | 120 | 0.4168 | 0.4238 | 0.4525 | 0.4605 | 63.77 |
 
-Across 39 sequences, ERP wrap improves AUC by `+0.0928` and SR by `+0.1181`.
-The large gains include `0001` (`0.5470→0.8806`), `0003`
-(`0.2551→0.6413`), `0014` (`0.2616→0.7284`), `0017`
-(`0.3748→0.6045`), `0018` (`0.4995→0.8145`), and `0035`
-(`0.6005→0.7360`). Regressions are retained in
-the raw per-sequence CSV rather than hidden. Box-level soft fusion remains a
-negative ablation because independently evolving experts lose temporal
-consistency.
+Across all 120 sequences, ERP wrap improves ordinary AUC by `+0.0975` and
+SR@0.5 by `+0.1251`. The raw per-sequence CSV retains both gains and
+regressions; no sequences were removed from the macro average.
+
+The earlier 39-sequence checkpoint was consistent with the final direction:
+ERP wrap AUC/SR `0.4988/0.5578` versus base `0.4060/0.4397`.
 
 FPS was measured while two GPUs, concurrent JPEG decoding, and dataset transfer
 were active. Accuracy is comparable; the aggregate speed difference is not a
@@ -77,14 +74,20 @@ clean isolated overhead measurement.
 - UETrack file-protocol helper checks: 3/3 passed on the server.
 - UETrack file-protocol GPU smoke: 5/5 frames passed on the server.
 - Geometry fusion regression checks: 3/3 passed.
+- Final strict scorer: 240 tracker/sequence rows (120 baseline + 120 ERP wrap),
+  with exact prediction/GT lengths and no missing sequence.
 
 ## Artifact locations
 
-- Local raw stage results: `runs/grt360_20260809/`
-- Tracked 39-sequence evidence: `reports/results/erpwrap_ablation_0001_0039_bakeoff.json`
+- Final JSON evidence: `reports/results/erpwrap_ablation_0001_0120_bakeoff.json`
+- Final CSV evidence: `reports/results/erpwrap_ablation_0001_0120_scores.csv`
+- Earlier 39-sequence checkpoint evidence remains in `reports/results/*0039*`.
+- Final raw result archive:
+  `D:/instan/deliverables/GRT360_2026-08-09/results/uetrack_results_0001_0120.tar.zst`
 - Research handoff deck: `reports/GRT360_Research_Handoff_2026-08-09.pptx`
 - Delivery manifest: `reports/GRT360_DELIVERY_MANIFEST_2026-08-09.md`
-- Server raw stage results: `/data/projects/instan/runs/grt360_20260809/`
+- Server raw results: `/data/projects/instan_check/uetrack_output/test/tracking_results/uetrack/`
+- Server run logs and score output: `/data/projects/instan/runs/grt360_20260809/`
 - Server clean code checkout: `/data/projects/instan_grt360`
 - Server pre-change backup:
   `/data/backups/instan_code_before_grt360_20260809_043053.tgz`
