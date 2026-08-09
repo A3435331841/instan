@@ -39,6 +39,7 @@ def main(argv=None):
     dataset_target.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(HERE / 'erpdataset.py', dataset_target)
     shutil.copy2(HERE / 'run_erp.py', workspace / '_grt360_run_erp.py')
+    shutil.copy2(HERE / 'file_protocol.py', workspace / '_grt360_file_protocol.py')
     shutil.copy2(HERE / 'erp_wrap.py', workspace / 'erp_wrap.py')
 
     registry = workspace / 'lib/test/evaluation/datasets.py'

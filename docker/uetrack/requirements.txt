@@ -1,0 +1,14 @@
+clip @ git+https://github.com/openai/CLIP.git@d05afc436d78f1c48dc0dbf8e5980a9d471f35f6
+easydict==1.13
+einops==0.8.2
+jpeg4py==0.1.4
+lmdb==2.3.0
+numpy==2.2.6
+opencv-python-headless==4.12.0.88
+pandas==2.3.3
+Pillow==12.2.0
+PyYAML==6.0.3
+scipy==1.15.3
+tensorboardX==2.6.5
+timm==0.5.4
+yacs==0.1.8
