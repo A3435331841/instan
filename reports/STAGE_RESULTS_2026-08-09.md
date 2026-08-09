@@ -83,7 +83,7 @@ GitHub：
 
 - 分支：`agent/panotrack-v2`
 - 草稿 PR：<https://github.com/A3435331841/instan/pull/1>
-- 最新提交：`694c176`
+- 结果发布提交：`694c176`（后续仅更新文档锚点）
 
 ## 五、完整性检查
 

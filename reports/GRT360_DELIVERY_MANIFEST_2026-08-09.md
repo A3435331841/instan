@@ -4,7 +4,7 @@
 
 - Git 分支：`agent/panotrack-v2`
 - GitHub 草稿 PR：<https://github.com/A3435331841/instan/pull/1>
-- 最新提交：`694c176`
+- 结果发布提交：`694c176`（后续仅更新文档锚点）
 - 严格评测范围：360VOT `0001–0120`，120 条序列。
 - 已完成的数值架构：UETrack、UETrack ERP-wrap、LightFC ONNX、ODTrack Base + ERP 三平铺适配。
 - LoRAT 官方 `base.bin` 已取得并校验，但尚未接入严格 GRT-360 帧级适配器，未列入数值排名。
