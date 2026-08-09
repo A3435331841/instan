@@ -14,7 +14,7 @@
 
 | Artifact | Location | SHA-256 / status |
 | --- | --- | --- |
-| Research handoff PPTX | `D:/instan/deliverables/GRT360_2026-08-09/GRT360_Research_Handoff_2026-08-09.pptx` | `3a64fb1ab9a27f0c1b3e486ae4927b9743ba716a09939aa52eb516a483a72ec3` |
+| Research handoff PPTX | `D:/instan/deliverables/GRT360_2026-08-09/GRT360_Research_Handoff_2026-08-09.pptx` | `aa48a44936cd577867e84af29fd7f32e4e66fdc97a79086a3b4ce458fd6cf552` |
 | Offline UETrack image tar | `D:/instan/deliverables/GRT360_2026-08-09/docker/grt360-uetrack_2026-08-09_linux-amd64.tar` | `1919ba75a90a07a54e7def09234a0ea492dee22629685a262ca2e1892cc50c54` |
 | Image manifest ID | `grt360-uetrack:2026-08-09` | `sha256:21508ea8959c0dda8b96747a670d06a68d897aa3a949e0f1c4e146a6adf0368a` |
 
@@ -25,9 +25,9 @@ kept in the local handoff directory.
 ## Tracked evidence
 
 - `reports/STAGE_RESULTS_2026-08-09.md` — current status and interpretation.
-- `reports/results/erpwrap_ablation_0001_0029_bakeoff.json` — strict protocol,
-  macro summaries, and per-sequence rows for the 29-sequence stage.
-- `reports/results/erpwrap_ablation_0001_0029_scores.csv` — tabular stage rows.
+- `reports/results/erpwrap_ablation_0001_0039_bakeoff.json` — strict protocol,
+  macro summaries, and per-sequence rows for the 39-sequence stage.
+- `reports/results/erpwrap_ablation_0001_0039_scores.csv` — tabular stage rows.
 - `reports/GRT360_Research_Handoff_2026-08-09.pptx` — audience-facing summary.
 
 ## Validation boundary
@@ -36,5 +36,5 @@ kept in the local handoff directory.
 - The local WSL Docker runtime has no visible NVIDIA adapter. Identical
   installed UETrack code and checkpoint passed a 5-frame GPU file-protocol
   smoke test on the two-RTX-3090 server.
-- The 120-sequence paired queue is still running on the server; 29 sequences
+- The 120-sequence paired queue is still running on the server; 39 sequences
   are frozen in the tracked stage report, not presented as a final 120 result.

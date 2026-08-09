@@ -25,7 +25,7 @@ ordinary and dual IoU, SR@0.5, 21-point AUC, equal-weight macro average.
 UETrack is the selected backbone. LoRAT and ODTrack were not assigned fabricated
 scores: no usable pinned checkpoints were present in the handoff environment.
 
-## Seam-aware UETrack ablation (0001–0029)
+## Seam-aware UETrack ablation (0001–0039)
 
 The enhancement replaces horizontal black padding with ERP circular sampling
 and retains seam-crossing box extent. Vertical padding remains unchanged. It
@@ -33,14 +33,15 @@ is opt-in for ablation runs and is the default in the final file protocol.
 
 | Variant | Sequences | Ordinary AUC | SR@0.5 | Observed FPS |
 | --- | ---: | ---: | ---: | ---: |
-| UETrack ERP wrap | 29 | 0.4860 | 0.5452 | 54.54 |
-| UETrack base | 29 | 0.3892 | 0.4217 | 60.67 |
+| UETrack ERP wrap | 39 | 0.4988 | 0.5578 | 56.63 |
+| UETrack base | 39 | 0.4060 | 0.4397 | 62.39 |
 | Geometry soft fusion, best transition | 10 | 0.3535 | 0.3767 | not comparable |
 
-Across 29 sequences, ERP wrap improves AUC by `+0.0968` and SR by `+0.1235`.
+Across 39 sequences, ERP wrap improves AUC by `+0.0928` and SR by `+0.1181`.
 The large gains include `0001` (`0.5470→0.8806`), `0003`
 (`0.2551→0.6413`), `0014` (`0.2616→0.7284`), `0017`
-(`0.3748→0.6045`), and `0018` (`0.4995→0.8145`). Regressions are retained in
+(`0.3748→0.6045`), `0018` (`0.4995→0.8145`), and `0035`
+(`0.6005→0.7360`). Regressions are retained in
 the raw per-sequence CSV rather than hidden. Box-level soft fusion remains a
 negative ablation because independently evolving experts lose temporal
 consistency.
@@ -80,7 +81,7 @@ clean isolated overhead measurement.
 ## Artifact locations
 
 - Local raw stage results: `runs/grt360_20260809/`
-- Tracked 29-sequence evidence: `reports/results/erpwrap_ablation_0001_0029_bakeoff.json`
+- Tracked 39-sequence evidence: `reports/results/erpwrap_ablation_0001_0039_bakeoff.json`
 - Research handoff deck: `reports/GRT360_Research_Handoff_2026-08-09.pptx`
 - Delivery manifest: `reports/GRT360_DELIVERY_MANIFEST_2026-08-09.md`
 - Server raw stage results: `/data/projects/instan/runs/grt360_20260809/`
