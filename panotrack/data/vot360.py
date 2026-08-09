@@ -196,6 +196,25 @@ def _resolve_sequence(seq_dir):
     return paths, gt, d
 
 
+def load_vot360_annotations(seq_dir, max_frames=None):
+    """Load frame paths and aligned ``[x, y, w, h]`` annotations only.
+
+    Unlike :func:`load_vot360_sequence`, this helper does not decode image
+    pixels.  It is intended for scoring predictions produced by external
+    trackers, where only the first image header is needed to obtain ERP width.
+    """
+    paths, gt, resolved_dir = _resolve_sequence(seq_dir)
+    if max_frames is not None:
+        paths = paths[:int(max_frames)]
+        gt = gt[:int(max_frames)]
+    if len(paths) != len(gt):
+        raise ValueError(
+            f'帧数({len(paths)})与 GT 行数({len(gt)})不一致: {resolved_dir}')
+    if not paths:
+        raise FileNotFoundError(f'序列为空（无帧图像）: {resolved_dir}')
+    return paths, np.asarray(gt, dtype=float).reshape(-1, 4)
+
+
 def load_vot360_sequence(seq_dir, downscale=1.0, max_frames=None):
     """加载一个 360VOT 序列：帧图像 + [x1 y1 w h] 真值。
 
