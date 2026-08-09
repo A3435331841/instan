@@ -68,9 +68,18 @@ class LightFCONNX(BaseTracker):
         providers = (['CUDAExecutionProvider', 'CPUExecutionProvider']
                      if str(backend).lower() == 'cuda'
                      else ['CPUExecutionProvider'])
+        # A long 4K sequence can otherwise make ONNX Runtime's process-wide
+        # CPU arena retain tens of gigabytes of transient JPEG/crop buffers.
+        # Disable the arena and memory-pattern cache so a sequence process can
+        # release its peak allocation deterministically.
+        sess_options = ort.SessionOptions()
+        sess_options.enable_cpu_mem_arena = False
+        sess_options.enable_mem_pattern = False
         self._sess_b = ort.InferenceSession(self.backbone_path,
+                                            sess_options=sess_options,
                                             providers=providers)
         self._sess_t = ort.InferenceSession(self.tracking_path,
+                                            sess_options=sess_options,
                                             providers=providers)
         self.state = None
         self.z_feat = None
