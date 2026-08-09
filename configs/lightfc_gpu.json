@@ -3,6 +3,7 @@
   "backbone_path": "models/lightfc_backbone.onnx",
   "tracking_path": "models/lightfc_tracking.onnx",
   "backend": "cuda",
+  "max_crop_size": 2048,
   "search_size": 256,
   "search_factor": 4.0,
   "template_size": 128,
