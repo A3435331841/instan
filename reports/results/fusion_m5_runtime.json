@@ -1,0 +1,23 @@
+{
+  "benchmark": "Spherical Confidence-Gated Expert Fusion",
+  "dataset_sequences": 120,
+  "processed_frames_excluding_initialization": 112657,
+  "server": "RTX 3090 pair; route benchmark on panotrack environment",
+  "router_only_runs_seconds": [8.04, 7.53, 8.09],
+  "router_only_fps": [14012.0647, 14961.0890, 13925.4635],
+  "router_only_fps_median": 14012.0647,
+  "expert_fps": {
+    "odtrack_erp3tile": 8.9945490324,
+    "uetrack_erpwrap": 57.1605613288,
+    "lightfc_onnx": 9.7875110149
+  },
+  "estimated_end_to_end_fps_parallel": 8.9945490324,
+  "estimated_end_to_end_fps_sequential": 7.7716365188,
+  "method": "Parallel two-GPU estimate is bounded by the slow ODTrack expert; sequential estimate is 1/(1/OD FPS + 1/UE FPS), excluding small router overhead.",
+  "accuracy": {
+    "auc": 0.5792135072571573,
+    "sr": 0.6531941585709963,
+    "auc_dual": 0.5819064920054589,
+    "sr_dual": 0.6562441036102405
+  }
+}
