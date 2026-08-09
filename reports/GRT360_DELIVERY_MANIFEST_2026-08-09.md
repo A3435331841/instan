@@ -22,7 +22,7 @@
 
 | 交付物 | 路径 | SHA-256 |
 | --- | --- | --- |
-| 中文最终报告 | `D:/instan/pano360/reports/STAGE_RESULTS_2026-08-09.md` | `335f63ad31062522d0857c7321410d18030fbfbe689b1050599bca794d534765` |
+| 中文最终报告 | `D:/instan/pano360/reports/STAGE_RESULTS_2026-08-09.md` | `ce5d38da1ffcd0786408e27255f85ec20f33a263db4c2eb2e21647d077802e5f` |
 | 四架构汇总 JSON | `D:/instan/pano360/reports/results/architecture_bakeoff_0001_0120.json` | `f01b0fa771ff01301ddd4c6e62c4f28a26d3385b4da2535393e5b9a70d274b2a` |
 | UETrack JSON | `D:/instan/pano360/reports/results/erpwrap_ablation_0001_0120_bakeoff.json` | `d49046a7a0395c48aae451f584e8f729244f0ead6e286dc29f00055d9dc0a333` |
 | UETrack CSV | `D:/instan/pano360/reports/results/erpwrap_ablation_0001_0120_scores.csv` | `b5e99afd9ce2322e7d9b3104e79dd5850ca8a76842e06618e18a972d41fa3953` |
@@ -76,3 +76,8 @@
 - 速度报告：`D:/instan/pano360/reports/results/fusion_m5_runtime.json`。
 - 融合路由器本身：112657 个非首帧预测，3 次耗时 `8.04/7.53/8.09 s`，中位约 `14012 FPS`。
 - 真实端到端：两张 GPU 并行等待 ODTrack 与 UETrack，约 `8.99 FPS`；串行约 `7.77 FPS`。该融合器没有超过 UETrack 的 57.16 FPS。
+-
+## 快路径校正试验
+
+- UETrack 置信度试验：`D:/instan/pano360/reports/results/uetrack_confidence_pilot_0001_0010.json`。
+- 结论：低阈值速度较快但精度明显下降；高阈值接近 ODTrack 时速度优势消失，暂不作为最终提交架构。

@@ -108,3 +108,9 @@ GitHub：
 若按真实部署同时运行两张 GPU：ODTrack `8.9945 FPS`、UETrack ERP-wrap `57.1606 FPS`，融合结果必须等待两个专家，因此端到端吞吐上限约 `8.99 FPS`；若两个专家串行运行，约 `7.77 FPS`。最终可交付结果为：AUC `0.5792`、SR `0.6532`、端到端约 `8.99 FPS`，精度与 ODTrack 持平但没有超过它，也没有超过 UETrack 的速度。
 
 速度证据：`reports/results/fusion_m5_runtime.json`。
+-
+## 快路径 + 低置信度校正试验
+
+进一步读取 UETrack 的 `best_score`，测试“UETrack 每帧运行，低置信度时替换为 ODTrack”策略。10 条序列的阈值扫描表明：阈值 `0.35` 时估计串行速度约 `43.80 FPS`，但 AUC 仅 `0.4008`；阈值升到 `0.80` 时 AUC `0.5422`、SR `0.5998`，速度降到约 `8.49 FPS`；只有阈值接近 `0.90`、几乎每帧调用 ODTrack 时才接近 ODTrack 精度。当前检查点没有形成精度和速度兼具的版本。
+
+试验数据：`reports/results/uetrack_confidence_pilot_0001_0010.json`。

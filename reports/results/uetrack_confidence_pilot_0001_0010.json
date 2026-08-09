@@ -1,0 +1,12 @@
+{
+  "sequences": 10,
+  "method": "UETrack ERP-wrap every frame; replace prediction with ODTrack ERP3tile when UETrack best_score is below threshold",
+  "threshold_sweep": [
+    {"threshold": 0.35, "auc": 0.4008214285, "sr": 0.4314347633, "od_fraction": 0.047986, "serial_fps_estimate": 43.8028},
+    {"threshold": 0.50, "auc": 0.4406082857, "sr": 0.4754693806, "od_fraction": 0.227359, "serial_fps_estimate": 23.3798},
+    {"threshold": 0.65, "auc": 0.5145917132, "sr": 0.5661421393, "od_fraction": 0.588349, "serial_fps_estimate": 12.0618},
+    {"threshold": 0.80, "auc": 0.5422454959, "sr": 0.5998451439, "od_fraction": 0.902464, "serial_fps_estimate": 8.4869},
+    {"threshold": 0.90, "auc": 0.5509161958, "sr": 0.6120894072, "od_fraction": 0.995644, "serial_fps_estimate": 7.8010}
+  ],
+  "conclusion": "低置信度触发策略只有在几乎每帧调用 ODTrack 时才接近 ODTrack 精度，因此当前检查点没有形成精度/速度兼具的可交付版本。"
+}
