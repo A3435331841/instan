@@ -24,6 +24,17 @@ Run selected sequences on one GPU, resuming completed outputs:
   --seqs 0001,0002,0003 --gpu 0 --skip-existing
 ```
 
+Run the seam-aware ablation into a separate result directory:
+
+```bash
+/opt/miniconda3/envs/uetrack/bin/python \
+  /data/projects/instan/integrations/uetrack/run_erp.py \
+  --workspace /data/projects/instan_check/UETrack \
+  --data /data/projects/instan/data360 \
+  --seqs 0001,0002,0003 --gpu 0 --erp-wrap --result-tag erpwrap \
+  --skip-existing
+```
+
 Score the generated files with `scripts/score_external_results.py`. Accuracy
 and native tracker timing remain separate; the scorer excludes the initialized
 first frame and emits both ordinary and seam-aware dual IoU metrics.

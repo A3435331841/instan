@@ -3,6 +3,7 @@
 """Run an installed UETrack adapter on selected 360VOT ERP sequences."""
 import argparse
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -21,6 +22,10 @@ def main(argv=None):
     parser.add_argument('--tracker', default='uetrack')
     parser.add_argument('--parameter', default='uetrack_base')
     parser.add_argument('--skip-existing', action='store_true')
+    parser.add_argument('--erp-wrap', action='store_true',
+                        help='enable horizontal circular crop and box wrap')
+    parser.add_argument('--result-tag', default=None,
+                        help='write to PARAMETER_TAG without changing checkpoint')
     args = parser.parse_args(argv)
 
     workspace = Path(args.workspace).resolve()
@@ -36,6 +41,18 @@ def main(argv=None):
 
     dataset = get_dataset('erp')
     tracker = Tracker(args.tracker, args.parameter, 'erp', None)
+    if args.erp_wrap:
+        from erp_wrap import clip_box_erp, sample_target_erp
+        import lib.test.tracker.uetrack as tracker_module
+        tracker_module.sample_target = sample_target_erp
+        tracker_module.clip_box = clip_box_erp
+        print('ERP_WRAP enabled', flush=True)
+    if args.result_tag:
+        if not re.fullmatch(r'[A-Za-z0-9_.-]+', args.result_tag):
+            raise ValueError('--result-tag contains unsafe characters')
+        tracker.results_dir = str(
+            Path(tracker.results_dir).parent
+            / f'{args.parameter}_{args.result_tag}')
     print('WORKSPACE', workspace, flush=True)
     print('DATA', os.environ['GRT360_DATA_ROOT'], flush=True)
     print('SEQUENCES', [sequence.name for sequence in dataset], flush=True)

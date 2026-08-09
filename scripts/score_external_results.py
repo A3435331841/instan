@@ -123,6 +123,11 @@ def score_sequence(tracker, result_root, seq_dir):
 
 def aggregate(rows):
     """Return macro averages, one equal-weight vote per sequence."""
+    def finite_mean(values):
+        values = np.asarray(values, dtype=float)
+        values = values[np.isfinite(values)]
+        return float(np.mean(values)) if values.size else float('nan')
+
     grouped = {}
     for row in rows:
         grouped.setdefault(row['tracker'], []).append(row)
@@ -131,7 +136,7 @@ def aggregate(rows):
         summary.append({
             'tracker': tracker,
             'n_sequences': len(tracker_rows),
-            **{key: float(np.nanmean([r[key] for r in tracker_rows]))
+            **{key: finite_mean([r[key] for r in tracker_rows])
                for key in ('sr', 'sr_dual', 'auc', 'auc_dual', 'fps')},
         })
     summary.sort(key=lambda row: (row['auc'], row['sr']), reverse=True)
@@ -168,8 +173,17 @@ def write_outputs(rows, out_dir, tracker_roots, selected_sequences):
         'summary': summary,
         'rows': rows,
     }
+    def json_safe(value):
+        if isinstance(value, dict):
+            return {key: json_safe(item) for key, item in value.items()}
+        if isinstance(value, list):
+            return [json_safe(item) for item in value]
+        if isinstance(value, (float, np.floating)) and not np.isfinite(value):
+            return None
+        return value
     with open(out_dir / 'bakeoff.json', 'w', encoding='utf-8') as handle:
-        json.dump(payload, handle, ensure_ascii=False, indent=2, allow_nan=False)
+        json.dump(json_safe(payload), handle, ensure_ascii=False,
+                  indent=2, allow_nan=False)
     return payload
 
 
