@@ -1,0 +1,62 @@
+{
+  "protocol": {
+    "dataset": "360VOT test",
+    "n_sequences": 120,
+    "sequence_range": "0001-0120",
+    "first_frame_excluded": true,
+    "strict_prediction_length": true,
+    "ordinary_iou": true,
+    "dual_iou_horizontal_shifts": ["-W", "0", "+W"],
+    "macro_average": "equal weight per sequence"
+  },
+  "summary": [
+    {
+      "tracker": "UETrack-ERPWrap",
+      "n_sequences": 120,
+      "sr": 0.5776136688644523,
+      "sr_dual": 0.5797524149379805,
+      "auc": 0.5142648725512625,
+      "auc_dual": 0.5162523388071542,
+      "fps": 57.16056132877852,
+      "source": "erpwrap_ablation_0001_0120_bakeoff.json"
+    },
+    {
+      "tracker": "UETrack",
+      "n_sequences": 120,
+      "sr": 0.45246888175865235,
+      "sr_dual": 0.46054075826000546,
+      "auc": 0.41679719983540636,
+      "auc_dual": 0.4238449196224391,
+      "fps": 63.770653808002756,
+      "source": "erpwrap_ablation_0001_0120_bakeoff.json"
+    },
+    {
+      "tracker": "LightFC ONNX",
+      "n_sequences": 120,
+      "sr": 0.3298604941425111,
+      "sr_dual": 0.33102829003353934,
+      "auc": 0.3115977320847986,
+      "auc_dual": 0.3127627101766449,
+      "fps": 9.787511014909292,
+      "source": "lightfc_120_score/bakeoff.json"
+    },
+    {
+      "tracker": "ODTrack Base + ERP 三平铺适配",
+      "n_sequences": 120,
+      "sr": 0.6531941585709963,
+      "sr_dual": 0.6562441036102405,
+      "auc": 0.5792135072571573,
+      "auc_dual": 0.5819064920054589,
+      "fps": 8.994549032381393,
+      "source": "odtrack_120_score/bakeoff.json"
+    }
+  ],
+  "not_scored": [
+    {
+      "tracker": "LoRAT",
+      "weights": "base.bin",
+      "weights_sha256": "150edc6635c7615a82d7fd50d95d84f8e47a47c9217e8fd5b3dd326589aac23e",
+      "reason": "已取得官方权重，但官方 TrackIt/VOT 流程没有直接接入本项目严格 360VOT 帧级协议的适配器；为避免把不一致的普通基准结果混入赛马，暂不列入数值排名。"
+    }
+  ]
+}

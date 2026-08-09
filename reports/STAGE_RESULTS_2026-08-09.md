@@ -1,89 +1,94 @@
-# GRT-360 最终研究报告（2026-08-09）
+# GRT-360 完整赛马研究报告（2026-08-09）
 
-120 条序列的成对评测已经全部完成。本报告记录统一评测协议、最终结果、
-验证情况和交付物位置。
+## 结论先说
 
-## 一、版本与复现锚点
+已完成 0001–0120 全部 120 条序列的多架构严格评测。当前纳入数值排名的四组结果如下：
 
-- 主仓库分支：`agent/panotrack-v2`
-- UETrack 上游提交：`fd13b0eaf16d51536008295f3b27807c69eaad50`
-- UETrack 权重 SHA-256：
-  `1d34778a41c553e3a5e17829d33df4a644f7c948b054a64f46e02fa99558b901`
-- CLIP ViT-L/14 缓存 SHA-256：
-  `b8cca3fd41ae0c99ba7e8951adf17d267cdb84cd88be6f7c2e0eca1737a03836`
-
-## 二、统一三序列初筛
-
-评测协议：严格检查预测框与 GT 行数；第一帧只用于初始化、不计入精度；
-同时计算普通 IoU 与 ERP 双 IoU；使用 21 点 AUC、SR@0.5，并按序列等权
-进行宏平均。
-
-| 跟踪器 | 序列数 | 普通 AUC | SR@0.5 | 原生 FPS |
-| --- | ---: | ---: | ---: | ---: |
-| UETrack 基线 | 3 | 0.5247 | 0.5953 | 61.40 |
-| LightFC ONNX | 3 | 0.3364 | 0.3687 | 6.78 |
-
-因此后续实验选用 UETrack 作为主干。LoRAT 和 ODTrack 没有可验证的固定权重，
-本项目没有编造它们的成绩。
-
-## 三、120 序列最终评测
-
-ERP-wrap 改进将水平方向的黑色填充替换为 ERP 环形采样，同时保留跨 seam
-目标框的范围；垂直方向仍使用普通填充。两种版本使用完全相同的严格 scorer
-在 0001–0120 全部 120 条序列上评测。
-
-| 版本 | 序列数 | 普通 AUC | 双 IoU AUC | SR@0.5 | 双 IoU SR | 观测 FPS |
+| 架构/版本 | 序列数 | 普通 AUC | 双 IoU AUC | SR@0.5 | 双 IoU SR | 观测 FPS |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| UETrack ERP-wrap | 120 | 0.5143 | 0.5163 | 0.5776 | 0.5798 | 57.16 |
+| ODTrack Base + ERP 三平铺适配 | 120 | **0.5792** | **0.5819** | **0.6532** | **0.6562** | 8.99 |
+| UETrack ERP-wrap | 120 | 0.5143 | 0.5163 | 0.5776 | 0.5798 | **57.16** |
 | UETrack 基线 | 120 | 0.4168 | 0.4238 | 0.4525 | 0.4605 | 63.77 |
+| LightFC ONNX | 120 | 0.3116 | 0.3128 | 0.3299 | 0.3310 | 9.79 |
 
-最终 ERP-wrap 相比基线提升：普通 AUC `+0.0975`，SR@0.5 `+0.1251`。
-原始逐序列 CSV 保留了所有提升和回归，没有删除任何序列。
+因此，按精度指标 ODTrack 是本轮全量赛马第一；按速度 UETrack 基线最快。ERP-wrap 相对 UETrack 基线提升普通 AUC `+0.0975`、SR `+0.1251`。LightFC 已完成全量评测，但精度低于另外三组。
 
-此前 39 序列阶段的结果方向一致：ERP-wrap AUC/SR 为 `0.4988/0.5578`，
-基线为 `0.4060/0.4397`。
+LoRAT 官方 `base.bin` 已取得并校验，但官方 TrackIt/VOT 流程还没有直接接入本项目严格 360VOT 帧级协议的适配器。为避免把不一致的普通基准结果混入排名，LoRAT 只作为“权重已就绪、尚未纳入严格数值表”记录。
 
-FPS 测量期间两张 GPU、JPEG 解码和数据同步同时运行，因此速度差异只作为
-观测值，不作为严格的单因素开销结论。
+## 一、统一评测协议
 
-## 四、离线交付
+- 数据集：GRT-360 / 360VOT 测试集，序列 `0001–0120`，共 120 条。
+- 首帧只用于初始化，不计入精度；预测框与 GT 行数必须严格一致。
+- 计算普通 IoU 以及 ERP 水平环绕后的双 IoU（水平位移 `-W/0/+W`）。
+- AUC 使用 21 个成功阈值，SR 为 IoU 阈值 0.5 下的成功率；序列等权宏平均。
+- 所有全量结果均由同一 `score_external_results.py` 严格评分器生成。
 
-- LightFC 轻量镜像已通过五帧 `--network none` 断网运行检查。
-- UETrack 镜像提供通用文件协议：`--frames --init --out --timing`，并固定
-  CUDA/PyTorch 基础镜像，内置 UETrack 权重和 CLIP 缓存。
-- 最终 `linux/amd64` 镜像 ID：
-  `sha256:21508ea8959c0dda8b96747a670d06a68d897aa3a949e0f1c4e146a6adf0368a`
-- 基础镜像清单 ID：
-  `sha256:fc47f8018254e6df30f48c48f2db1c758d44de21a8c553de1a1c451a65baa70a`
-- 镜像归档大小：`5,991,662,592` 字节；SHA-256：
-  `1919ba75a90a07a54e7def09234a0ea492dee22629685a262ca2e1892cc50c54`
-- 断网导入检查确认 PyTorch `2.3.1`、CUDA `12.1`，且权重与 CLIP 哈希一致。
-- 本地 WSL Docker 没有可用 NVIDIA 适配器，因此 GPU 检查在服务器两张 RTX 3090
-  上完成：5/5 结果行、5/5 计时行，第一帧框数值保持一致。
+## 二、各架构全量结果
 
-## 五、验证结果
+### 1. UETrack
 
-- 原有及新增核心测试模块共 14 个，已在本地和服务器通过。
-- CUDA 检查发现并修复 LoRA/MoE 设备返回问题，GPU 往返检查 21 项全部通过。
-- 外部 scorer 回归检查：3/3 通过。
-- UETrack 环形裁剪检查：4/4 通过。
-- 文件协议辅助检查：服务器 3/3 通过。
-- 文件协议 GPU 冒烟：5/5 帧通过。
-- 几何融合回归检查：3/3 通过。
-- 最终严格 scorer 完成 240 行结果，即基线 120 条加 ERP-wrap 120 条；预测与 GT
-  行数全部严格匹配。
+ERP-wrap 将水平方向的黑色填充替换为 ERP 环形采样，并保留跨 seam 目标框范围；垂直方向仍使用普通填充。两种版本均完成 120 条全量评测：
 
-## 六、成果保存位置
+- ERP-wrap：AUC `0.5142648726`，双 IoU AUC `0.5162523388`，SR `0.5776136689`，双 IoU SR `0.5797524149`，FPS `57.1606`。
+- 基线：AUC `0.4167971998`，双 IoU AUC `0.4238449196`，SR `0.4524688818`，双 IoU SR `0.4605407583`，FPS `63.7707`。
 
-- 最终 JSON：`reports/results/erpwrap_ablation_0001_0120_bakeoff.json`
-- 最终 CSV：`reports/results/erpwrap_ablation_0001_0120_scores.csv`
-- 39 序列阶段结果仍保留在 `reports/results/*0039*`。
-- 原始结果归档：
-  `D:/instan/deliverables/GRT360_2026-08-09/results/uetrack_results_0001_0120.tar.zst`
-- 研究汇报 PPT：`reports/GRT360_Research_Handoff_2026-08-09.pptx`
-- 交付清单：`reports/GRT360_DELIVERY_MANIFEST_2026-08-09.md`
-- 服务器原始结果：`/data/projects/instan_check/uetrack_output/test/tracking_results/uetrack/`
-- 服务器运行日志和 scorer 输出：`/data/projects/instan/runs/grt360_20260809/`
-- 服务器干净代码目录：`/data/projects/instan_grt360`
-- 服务器改动前备份：`/data/backups/instan_code_before_grt360_20260809_043053.tgz`
-- GitHub PR：<https://github.com/A3435331841/instan/pull/1>
+### 2. LightFC ONNX
+
+使用真实 LightFC backbone/tracking ONNX，CUDAExecutionProvider，完整 120 条、严格 1.0 分辨率评测。全量平均：AUC `0.3115977321`，双 IoU AUC `0.3127627102`，SR `0.3298604941`，双 IoU SR `0.3310282900`，FPS `9.7875`。
+
+为处理 4K ERP 长序列中的异常失锁框，加入了每条序列独立进程和 `max_crop_size=2048` 硬上限；这样 0069 等序列不会再把主机内存推到 OOM，且 120 条结果均已落盘。
+
+### 3. ODTrack
+
+使用官方 Base 全数据 300 epoch 权重，并加入 ERP 三平铺适配：将每帧水平复制为三块，初始框放入中间块，输出框再映射回原 ERP 坐标。两张 RTX 3090 各跑 60 条，最终合并为 120 条严格结果。
+
+全量平均：AUC `0.5792135073`，双 IoU AUC `0.5819064920`，SR `0.6531941586`，双 IoU SR `0.6562441036`，FPS `8.9945`。GPU0/GPU1 各 60 条，预测行数与 GT 全部匹配。
+
+### 4. LoRAT
+
+官方权重 `base.bin` 已下载、上传服务器并完成 SHA-256 校验（`150edc6635c7615a82d7fd50d95d84f8e47a47c9217e8fd5b3dd326589aac23e`）。当前缺少与本项目严格协议一致的直接帧级适配器及依赖闭环，因此没有把普通 TrackIt/VOT 结果冒充 GRT-360 严格成绩。
+
+## 三、工程与运行记录
+
+- 服务器：`root@153.0.134.134:12409`，两张 RTX 3090 24GB。
+- LightFC 使用 GPU0/GPU1 分片队列；每条序列独立 Python 进程，完成即写入 `metrics.json` 和 `results.txt`。
+- 0069 曾暴露异常预测框导致裁剪数组膨胀的问题；已终止异常进程、加入裁剪上限后从 0069 重跑，内存恢复正常，未影响其他序列。
+- ODTrack 使用同样的两 GPU 分片策略，并在两个分片全部结束后进行统一严格评分。
+- 关键修复已推送 GitHub：`2484144`（ODTrack 适配与运行保护）、`2cc7ddd`（异常裁剪保护）、`d12def4`（配置显式记录）。
+
+## 四、结果与证据保存位置
+
+本地（Windows）：
+
+- 中文报告：`D:/instan/pano360/reports/STAGE_RESULTS_2026-08-09.md`
+- 四架构汇总证据：`D:/instan/pano360/reports/results/architecture_bakeoff_0001_0120.json`
+- UETrack 全量 JSON/CSV：`D:/instan/pano360/reports/results/erpwrap_ablation_0001_0120_bakeoff.json`、`erpwrap_ablation_0001_0120_scores.csv`
+- LightFC 全量 JSON/CSV：`D:/instan/pano360/reports/results/lightfc_120_score/bakeoff.json`、`scores.csv`
+- ODTrack 全量 JSON/CSV：`D:/instan/pano360/reports/results/odtrack_120_score/bakeoff.json`、`scores.csv`
+- LightFC 原始结果归档：`D:/instan/pano360/reports/results/lightfc_results_0001_0120.tar.zst`
+- ODTrack 原始结果归档：`D:/instan/pano360/reports/results/odtrack_results_0001_0120.tar.zst`
+- 中文汇报 PPT：`D:/instan/pano360/reports/GRT360_Research_Handoff_2026-08-09.pptx`
+
+服务器：
+
+- 代码：`/data/projects/instan_grt360`
+- 数据：`/data/projects/instan/data360`
+- 运行根目录：`/data/projects/instan/runs/grt360_20260809/`
+- LightFC 严格评分：`/data/projects/instan/runs/grt360_20260809/lightfc_120_score/`
+- ODTrack 严格评分：`/data/projects/instan/runs/grt360_20260809/odtrack_120_score/`
+- ODTrack 合并结果：`/data/projects/instan/runs/grt360_20260809/odtrack_120/`
+- 自动收尾标记：`/data/projects/instan/runs/grt360_20260809/FINALIZED`
+
+GitHub：
+
+- 分支：`agent/panotrack-v2`
+- 草稿 PR：<https://github.com/A3435331841/instan/pull/1>
+- 最新提交：`d12def4`
+
+## 五、完整性检查
+
+- UETrack：基线 120 条 + ERP-wrap 120 条，预测/GT 行数全部匹配。
+- LightFC：120/120 条，CSV 120 行，JSON `n_sequences=120`。
+- ODTrack：GPU0 60/60 + GPU1 60/60，合并后 120/120 条，CSV 120 行，JSON `n_sequences=120`。
+- 所有原始结果归档和评分 JSON/CSV 均已传回本地；原始归档不放入 Git，评分证据和中文报告会提交 GitHub。
+- 密码、token 和私有缓存未进入 Git 跟踪文件。
