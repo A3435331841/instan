@@ -46,13 +46,14 @@ class LightFCONNX(BaseTracker):
 
     def __init__(self, backbone_path, tracking_path, search_size=256,
                  search_factor=4.0, template_size=128, template_factor=2.0,
-                 backend='cpu', **kwargs):
+                 backend='cpu', max_crop_size=2048, **kwargs):
         """创建 LightFC ONNX 跟踪器。
 
         参数: backbone_path —— lightfc_backbone.onnx;tracking_path ——
               lightfc_tracking.onnx;search_size/search_factor —— 搜索区尺寸与
               裁剪倍率;template_size/template_factor —— 模板尺寸与裁剪倍率;
-              backend —— 'cpu' 或 'cuda'(onnxruntime provider)。
+              backend —— 'cpu' 或 'cuda'(onnxruntime provider);
+              max_crop_size —— 失锁时搜索裁剪的硬上限。
         返回: None
         """
         del kwargs
@@ -62,6 +63,7 @@ class LightFCONNX(BaseTracker):
         self.search_factor = float(search_factor)
         self.template_size = int(template_size)
         self.template_factor = float(template_factor)
+        self.max_crop_size = max(256, int(max_crop_size))
         self.feat_sz = self.search_size // 16
         self.output_window = _hann2d(np.array([self.feat_sz, self.feat_sz]),
                                      centered=True)
@@ -103,6 +105,10 @@ class LightFCONNX(BaseTracker):
         x, y, w, h = (float(v) for v in target_bb)
         crop_sz = int(np.ceil(np.sqrt(w * h) * factor))
         crop_sz = max(crop_sz, 2)
+        # A lost tracker can predict an unbounded box.  Capping the crop
+        # prevents a 4K ERP frame from allocating a huge square before the
+        # patch is resized to the network input size.
+        crop_sz = min(crop_sz, self.max_crop_size)
         cx, cy = x + 0.5 * w, y + 0.5 * h
         half = crop_sz // 2
         # 用整数起点构造 arange,避免浮点误差导致长度多1(cx/cy 为浮点时)
