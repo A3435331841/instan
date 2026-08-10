@@ -76,7 +76,10 @@ def test_recapture_state_machine():
     # FakeTracker reinit 后返回该位置。
     init_box = [168.0, 108.0, 24.0, 24.0]
     boxes = [init_box] * 5
-    boxes += [[60.0, 60.0, 24.0, 24.0]] * 5          # 失锁段（错框）
+    # 失锁段：交替跳变框（真实错跟是持续漂移，静止错框靠 C_visual 才能检出，
+    # 而 C_visual 在离线标定里权重为 0，这里用跳变模拟漂移）
+    boxes += [[60.0 + 40 * (i % 2), 60.0 + 40 * ((i + 1) % 2), 24.0, 24.0]
+               for i in range(5)]
     ious = [0.8] * 5 + [0.05] * 5
     fake = FakeTracker(boxes, ious, reinit_box=[228.0, 108.0, 24.0, 24.0])
 
@@ -116,13 +119,14 @@ def test_verify_rejects_far_jump():
     mem = TemplateMemory(gate=ReliabilityGate(a=(1.5, 0.3, 0.3, 0.2, 0.2)))
     rd = SphericalMultiViewRedetector(mem.get_bank, min_score=0.95)
     # 框漂移 + 低可靠 -> 快速进入 LOST（设置 _lost_anchor_pos）
-    fake = FakeTracker([[60.0, 60.0, 24.0, 24.0]] * 20, [0.05] * 20)
+    fake = FakeTracker([[60.0 + 40 * (i % 2), 60.0 + 40 * ((i + 1) % 2), 24.0, 24.0]
+                           for i in range(20)], [0.05] * 20)
     tracker = OdtrackRecaptureTracker(fake, run_len=3, search_interval=1,
                                       motion_max_deg=60.0,
                                       memory=mem, redetector=rd)
     frames = [make_frame(W, H, target_cx=180, target_cy=120) for _ in range(6)]
     tracker.init(frames[0], [168.0, 108.0, 24.0, 24.0])
-    for i in range(1, 4):
+    for i in range(1, 5):
         tracker.update(frames[i])
     assert tracker._status == tracker.STATUS_LOST, '测试前置：应已进入 LOST'
     # 失锁前位置中心 (72,72)；候选 (300,120) -> 球面角距约 173° > 60°
@@ -148,8 +152,9 @@ def test_lost_placeholder_when_no_target():
     # 测试显式传入高 C_visual 权重的 gate，聚焦验证状态机逻辑。
     mem = TemplateMemory(gate=ReliabilityGate(a=(1.5, 0.3, 0.3, 0.2, 0.2)))
     rd = SphericalMultiViewRedetector(mem.get_bank, min_score=0.95)
-    fake = FakeTracker([[60.0, 60.0, 24.0, 24.0]] * 20,
-                       [0.05] * 20)  # 框漂移 + 全程低可靠（目标消失）
+    fake = FakeTracker([[60.0 + 40 * (i % 2), 60.0 + 40 * ((i + 1) % 2), 24.0, 24.0]
+                           for i in range(20)],
+                       [0.05] * 20)  # 跳变漂移 + 全程低可靠（目标消失）
     tracker = OdtrackRecaptureTracker(fake, run_len=3, search_interval=1,
                                       memory=mem, redetector=rd)
     frames = [make_frame(W, H, target_cx=None) for _ in range(8)]

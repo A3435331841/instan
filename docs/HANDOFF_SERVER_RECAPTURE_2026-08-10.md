@@ -72,8 +72,14 @@ python scripts/score_offline_gate.py --data data360 \
 ```
 
 **门槛**（对照本地 v1 结果：验证集召回 0.695 / 误报 0.284）：
-- 加入 NCC 后验证集误报率应显著下降（目标 < 0.15），召回不降；
-- 输出 JSON 里的 `gate.threshold / run_len` 即为最终判丢参数。
+- 本地 NCC 权重扫描（2026-08-10，60/60 留出）：
+  - `--w-ncc 0.5`：验证集召回 0.645 / 误报 **0.242**（推荐默认，误报最低）
+  - `--w-ncc 1.0`：验证集召回 **0.776** / 误报 0.359（激进救失锁备选）
+  - `--w-ncc 2.0`：误报 0.426，不推荐
+- 注意：这里的"误报"只是门控标记率，真实误锁还要过 VERIFY
+  （anchor 校验 + 分数门槛 + 运动约束），端到端误锁率会低得多；
+- 输出 JSON 里的 `gate.threshold / run_len` 即为最终判丢参数，
+  threshold 在 w_ncc=0.5 时为 0.55、run_len=5。
 
 ### Step 3：全量重捕获评测（约 3-5 小时，GPU）
 
@@ -86,6 +92,9 @@ python scripts/eval_odtrack_recapture.py \
   --run-len 5 --search-interval 5 --observe-frames 3 \
   --anchor-min-sim 0.5 --recapture-min-score 0.45 --motion-max-deg 90.0 \
   --out runs/odtrack_recapture_120
+# 注：判丢信号在 wrapper 内实时计算（含 anchor NCC 与运动/尺度/几何），
+# 与离线标定的 w_ncc=0.5/threshold=0.55 对应；若服务器上想用激进版
+# 可改 recapture.py 的 ReliabilityGate 权重（见 §3.3 说明）。
 ```
 
 **门槛**：

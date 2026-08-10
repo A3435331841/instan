@@ -122,17 +122,22 @@ class OdtrackRecaptureTracker:
     def __init__(self, odtrack_tracker, gate=None, memory=None,
                  redetector=None, run_len=5, search_interval=5,
                  observe_frames=3, anchor_min_sim=0.5, recapture_min_score=0.45,
-                 motion_max_deg=90.0):
+                 motion_max_deg=90.0, w_motion=1.0, w_scale=1.0, w_ncc=0.5,
+                 w_geom=1.0, threshold=0.55):
         """创建重捕获 wrapper。
 
         参数: odtrack_tracker 上游 ODTrack 实例（提供 initialize/track）；
-              gate ReliabilityGate（None 默认）；memory TemplateMemory（None 默认，
-              需在 init 后 set_anchor）；redetector SphericalMultiViewRedetector
-              （None 默认，get_templates 接 memory.get_bank）；
+              gate ReliabilityGate（None 默认，仅供模板记忆门控）；
+              memory TemplateMemory（None 默认，需在 init 后 set_anchor）；
+              redetector SphericalMultiViewRedetector（None 默认，
+              get_templates 接 memory.get_bank）；
               run_len 连续低可靠判 lost 帧数；search_interval LOST 态搜索间隔；
               observe_frames 找回后观察帧数；anchor_min_sim VERIFY 锚点相似度
               下限；recapture_min_score 重捕获 NCC 分数下限；
-              motion_max_deg 找回候选与失锁前位置的最大球面角距（度）。
+              motion_max_deg 找回候选与失锁前位置的最大球面角距（度）；
+              w_motion/w_scale/w_ncc/w_geom/threshold 判丢可靠性权重与阈值
+              （默认值 = 本地 60/60 离线标定结果 w_ncc=0.5 一档，
+              公式与 scripts/score_offline_gate.py 完全一致，可直接迁移）。
         """
         self.tracker = odtrack_tracker
         self.run_len = max(2, int(run_len))
@@ -141,17 +146,19 @@ class OdtrackRecaptureTracker:
         self.anchor_min_sim = float(anchor_min_sim)
         self.recapture_min_score = float(recapture_min_score)
         self.motion_max_deg = float(motion_max_deg)
+        # 判丢权重/阈值（与离线标定同公式，见 _reliability）
+        self.w_motion = float(w_motion)
+        self.w_scale = float(w_scale)
+        self.w_ncc = float(w_ncc)
+        self.w_geom = float(w_geom)
+        self.threshold = float(threshold)
 
-        # gate 与 memory 必须共享同一 ReliabilityGate（保证判丢与
-        # 模板写入门控一致）；显式 gate > memory 自带 gate > 默认
-        if gate is not None:
-            self.gate = gate
-        elif memory is not None:
-            self.gate = memory.gate
-        else:
-            self.gate = ReliabilityGate()
-        self.memory = memory if memory is not None \
-            else TemplateMemory(gate=self.gate)
+        # memory 的 gate 只用于模板记忆写入门控（accept_thr 语义），
+        # 与判丢可靠性是两回事，两者独立配置
+        if memory is None:
+            memory = TemplateMemory(gate=gate if gate is not None
+                                    else ReliabilityGate())
+        self.memory = memory
         self.redetector = redetector if redetector is not None \
             else SphericalMultiViewRedetector(self.memory.get_bank,
                                               min_score=self.recapture_min_score)
@@ -210,18 +217,27 @@ class OdtrackRecaptureTracker:
     def _reliability(self, frame: np.ndarray, box: Sequence[float]):
         """融合可靠性 R（低 = 判丢）。
 
+        公式与 scripts/score_offline_gate.py 完全一致（线性 logit + sigmoid，
+        权重/阈值来自离线 60/60 标定）：
+          logit = w_motion*(C_motion-0.5) + w_scale*(C_scale-0.5)
+                  + w_ncc*(C_anchor-0.5) - w_geom*geometry_risk
+        C_visual（last_pred_iou）在 wrapper 里不参与——离线标定时它只有
+        10 条序列的证据，权重设为 0；若服务器重跑全量 confidence 后
+        标定出它的权重，加进公式即可。
+
         返回: (r, c_motion, c_scale)。motion/scale 分量有状态副作用
         （推进速度/尺度 EMA），必须只在每帧调用一次，返回值供
         TemplateMemory.add 复用。
         """
-        c_visual = float(getattr(self.tracker, 'last_pred_iou', 0.5))
         c_anchor = self._c_anchor(frame, box)
         c_motion = self._c_motion(box)
         c_scale = self._c_scale(box)
         geom = _geometry_risk(box, self._erp_w, self._erp_h)
-        r = self.gate.reliability(
-            c_visual=c_visual, c_anchor=c_anchor, c_motion=c_motion,
-            c_scale=c_scale, geometry_risk=geom)
+        logit = (self.w_motion * (c_motion - 0.5)
+                 + self.w_scale * (c_scale - 0.5)
+                 + self.w_ncc * (c_anchor - 0.5)
+                 - self.w_geom * geom)
+        r = float(1.0 / (1.0 + np.exp(-np.clip(logit, -30.0, 30.0))))
         return r, c_motion, c_scale
 
     def _verify(self, frame: np.ndarray, candidate: Sequence[float],
@@ -313,7 +329,7 @@ class OdtrackRecaptureTracker:
 
         if self._status == self.STATUS_OBSERVE:
             self._observe += 1
-            if r >= 0.5:
+            if r >= self.threshold:
                 if self._observe >= self.observe_frames:
                     self._status = self.STATUS_NORMAL
                 return {'bbox': tuple(box), 'score': float(r),
@@ -327,7 +343,7 @@ class OdtrackRecaptureTracker:
                     'reliability': r}
 
         # NORMAL
-        if r < 0.5:
+        if r < self.threshold:
             self._low_run += 1
             if self._low_run >= self.run_len:
                 self._status = self.STATUS_LOST

@@ -99,7 +99,7 @@ OdtrackRecaptureTracker
 
 | 分量 | 来源 | 说明 |
 |---|---|---|
-| C_visual | `tracker.last_pred_iou`（IoU-head 响应图峰值） | 已实现于 odtrack_360vot_conf.py |
+| C_visual | `tracker.last_pred_iou`（IoU-head 响应图峰值） | 已实现于 odtrack_360vot_conf.py；**离线标定阶段权重为 0**（全量 confidence 需 GPU 重跑，本地只有 10 条证据不足）；服务器跑完 Step 1 全量后可加入公式并重标 |
 | C_anchor | 当前预测框 crop 与 anchor 模板的 NCC 相似度 | `TemplateMemory.anchor_similarity` 已有 |
 | C_motion | 预测框中心与恒速外推预测的球面距离 | `SphericalState`/`causal_dtp` 已有先验，wrapper 内做轻量圆周恒速 |
 | C_scale | 框面积 log 变化 vs 历史 EMA | 参考 `ReliabilityGate.c_scale` |
