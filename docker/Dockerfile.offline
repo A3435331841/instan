@@ -1,0 +1,24 @@
+# GRT-360 最终离线镜像。
+#
+# 只使用本机已有的 panotrack:latest 基础镜像，不执行 apt/pip，
+# 因而可在断网环境重新打包。构建前请确认 docker image inspect panotrack:latest。
+FROM panotrack:latest
+
+LABEL org.opencontainers.image.title="GRT-360 最终中文离线镜像"
+LABEL org.opencontainers.image.source="https://github.com/A3435331841/instan"
+LABEL grt360.best_accuracy="ODTrack ERP 三平铺 AUC=0.5792135073 SR=0.6531941586"
+LABEL grt360.balanced="GRT360-Causal-DTP-ERP 保守路由，与教师基线持平"
+LABEL grt360.offline="true"
+
+WORKDIR /app
+COPY panotrack ./panotrack
+COPY configs ./configs
+COPY scripts ./scripts
+COPY integrations ./integrations
+COPY docs ./docs
+COPY reports ./reports
+COPY models ./models
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["python", "-m", "panotrack.cli"]
