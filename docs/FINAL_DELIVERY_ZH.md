@@ -65,3 +65,31 @@ docker run --rm --network none grt360-final:2026-08-10 \
 - `reports/results/grt360_causal_dtp_erp_120_score/bakeoff.json`
 - `reports/GRT360_CANDIDATE_ARCHITECTURE_2026-08-10.md`
 - `reports/STAGE_RESULTS_2026-08-09.md`
+
+## 两套代码的实际参数
+
+### ODTrack 精度版
+
+- 上游配置：`baseline.yaml`；ViT-Base/patch16，stride=16；CE 层 `[3,6,9]`；
+  CE keep ratio `[0.7,0.7,0.7]`；`CE_TEMPLATE_RANGE=CTR_POINT`；`ATTN_TYPE=concat`；
+  Center head 通道数 256。
+- 模板：`TEMPLATE_FACTOR=2.0`、`TEMPLATE_SIZE=192`、`TEMPLATE_NUMBER=3`。
+- 搜索：`SEARCH_FACTOR=5.0`、`SEARCH_SIZE=384`。
+- 测试检查点：`EPOCH=300`、`MEMORY_THRESHOLD=1000`。
+- ERP 适配：每帧水平复制 3 次；首帧框放到中间副本；输出横坐标对原宽度取模。
+- 训练配置记录：AdamW、batch=8、epoch=300、LR=1e-4、GIoU=2.0、L1=5.0、AMP=False。
+
+### GRT360-Causal-DTP-ERP 均衡版
+
+- 专家顺序固定为：`0=ODTrack`、`1=UETrack ERP-wrap`、`2=LightFC`。
+- 路由默认值：`hold_frames=3`、`blend_alpha=0.18`、`teacher_margin=0.90`、
+  `recovery_margin=0.20`、`reliability_decay=18.0`、`geometry_penalty=0.35`。
+- 内部运动/可靠性参数：`velocity_alpha=0.35`、`scale_decay=3.0`、
+  `agreement_decay=12.0`。
+- ERP 风险：极区从绝对纬度 55° 开始加权；接缝按中心距小于约 12% 画面宽度计算风险；
+  同时惩罚尺度突变、预测创新量和专家分歧。
+- UETrack 底层上游参数：`fastitpnt_layer6`、stride=16、8 个 MoE expert、MoE layer `[5]`、
+  `SEARCH_FACTOR=4.0`、`SEARCH_SIZE=224`、`TEMPLATE_FACTOR=2.0`、`TEMPLATE_SIZE=112`、
+  `WINDOW=True`。
+- 当前采用保守阈值，优先保证 ODTrack 精度；降低 `teacher_margin` 才会增加学生接管，
+  但未经训练的激进版本已实测退化。
