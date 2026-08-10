@@ -103,6 +103,22 @@ python scripts/eval_odtrack_recapture.py \
 - **正常序列（基线 AUC>0.5 的约 90 条）不允许回退超过 0.01**——重捕获是给
   失锁序列兜底的，绝不能拿正常序列的成绩来换。
 
+### VERIFY 的诚实边界（离线数据复核，2026-08-10）
+
+本地 120 条离线 NCC 分布实测：anchor 校验（sim≥0）的过滤强度只有约
+17-19%（正常帧 77% 通过 vs 失锁帧 60% 通过）——4K 上 NCC 绝对值低、
+分布重叠大，**anchor 校验挡不住"低相似但 >0"的候选，它不是主要防线**。
+
+真正的主要防线是组合：
+1. `recapture-min-score`（NCC 搜索分数 ≥0.45，挡搜索阶段的虚报）；
+2. `motion-max-deg`（找回候选与失锁前位置的球面角距 ≤90°，挡远跳）；
+3. `observe-frames`（找回后 3 帧观察期，锁错会立刻掉回 LOST，代价只是一次搜索）。
+
+若服务器全量跑完误锁率仍高，按顺序调：`motion-max-deg` 收紧 →
+`recapture-min-score` 提高 → `anchor-min-sim` 提高（0.5 对应 sim≥0，
+提到 0.55-0.6 对应 sim≥0.1-0.2，过滤更强但找回率也降）。
+每调一次都要在验证集上重新评分，别凭感觉。
+
 ### Step 4：报告（回传给队长）
 
 - `summary.csv` + `bakeoff.json`（用 `scripts/score_external_results.py` 统一评分）；
