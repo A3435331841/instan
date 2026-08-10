@@ -118,8 +118,11 @@ OdtrackRecaptureTracker
 ### 3.3 滞回与防抖
 
 - 连续 N 帧 R < τ_ok 才进入 LOST（N 默认 5，标定）；
-- 恢复 NORMAL 后 M 帧内（M 默认 30）不重复触发重捕获，防震荡；
-- 单帧 R 抖动只影响模板写入门控（TemplateMemory 已自带 min_quality 门槛），不触发全图搜索。
+- 找回后经 OBSERVE 观察期（observe_frames=3）才回 NORMAL，观察期再次失锁
+  会直接回到 LOST（见 §4.3）——这就是恢复侧的防抖，代码里没有单独的
+  "恢复后 M 帧不重触发"计数器；
+- 单帧 R 抖动只影响模板写入门控（TemplateMemory 已自带 min_quality 门槛），
+  不触发全图搜索。
 
 ---
 

@@ -21,7 +21,10 @@ ODTrack 只对了其中 39 帧）——失锁一次之后时序记忆被污染�
 > AUC 0.618，全量 120 条一跑只有 0.31——**小样本数字不能当真**。
 > 这次也一样，重捕获版一定要跑全量、用严格评分器对比，别拿几条序列就说"涨了"。
 
-## 2. 代码与数据清单（均在 Git `main` = `a774509` 及之后提交）
+## 2. 代码与数据清单（均在 Git `main` = `17203af`）
+
+> 本地仓库已经是这个状态，`git pull` 拉最新即可；如果服务器上是旧代码，
+> 以这个提交为准。
 
 | 项 | 路径 | 说明 |
 |---|---|---|
@@ -41,11 +44,13 @@ ODTrack 只对了其中 39 帧）——失锁一次之后时序记忆被污染�
 ### Step 1：全量置信度采集（约 2-3 小时，两张 GPU 分片）
 
 ```bash
+# GPU0 跑前 60 条（--seqs 只支持逗号分隔，不支持范围写法，用下面这条命令生成列表）
+SEQ0=$(seq -s, -w 1 60)
 CUDA_VISIBLE_DEVICES=0 python scripts/odtrack_360vot_conf.py \
   --odtrack-root /data/projects/instan_check/odtrack \
   --data /data/projects/instan/data360 \
   --checkpoint /data/projects/instan_check/odtrack/output/checkpoints/train/odtrack/baseline/ODTrack_ep0300.pth.tar \
-  --config baseline --seqs 0001-0060 --gpu 0 --downscale 1.0 --out runs/odtrack_conf_gpu0
+  --config baseline --seqs "$SEQ0" --gpu 0 --downscale 1.0 --out runs/odtrack_conf_gpu0
 # GPU1 跑 0061-0120（参考 scripts/launch_odtrack_after.sh 的分片方式）
 ```
 
