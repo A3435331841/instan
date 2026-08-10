@@ -1,0 +1,142 @@
+{
+  "summary": {
+    "n_sequences": 10,
+    "mean_pearson_conf_iou": 0.3912450060333095,
+    "mean_roc_auc": 0.25259279319902345,
+    "mean_sr": 0.6120894071541926,
+    "mean_conf_ok": 0.6839256281209072,
+    "mean_conf_lost": 0.5504992183154128
+  },
+  "rows": [
+    {
+      "sequence": "0001",
+      "n_frames": 250,
+      "mean_iou": 0.9225605374192638,
+      "sr": 0.98,
+      "pearson_conf_iou": 0.2953766937920617,
+      "roc_auc_conf_lost": 0.19591836734693874,
+      "conf_mean_ok": 0.7753974564081633,
+      "conf_mean_lost": 0.533716302,
+      "conf_p25_lost": 0.41098982,
+      "n_lost_runs": 1,
+      "lost_run_frames": 3
+    },
+    {
+      "sequence": "0002",
+      "n_frames": 853,
+      "mean_iou": 0.44839644614694596,
+      "sr": 0.41617819460726846,
+      "pearson_conf_iou": 0.5641247694064481,
+      "roc_auc_conf_lost": 0.263425533118389,
+      "conf_mean_ok": 0.6308372945915492,
+      "conf_mean_lost": 0.5256027915261045,
+      "conf_p25_lost": 0.4407580975,
+      "n_lost_runs": 17,
+      "lost_run_frames": 484
+    },
+    {
+      "sequence": "0003",
+      "n_frames": 739,
+      "mean_iou": 0.6711154524636671,
+      "sr": 0.7334235453315291,
+      "pearson_conf_iou": 0.2582913199207615,
+      "roc_auc_conf_lost": 0.3485680034465319,
+      "conf_mean_ok": 0.734156287693727,
+      "conf_mean_lost": 0.6644559321827412,
+      "conf_p25_lost": 0.56739968,
+      "n_lost_runs": 18,
+      "lost_run_frames": 186
+    },
+    {
+      "sequence": "0004",
+      "n_frames": 689,
+      "mean_iou": 0.09229069275865137,
+      "sr": 0.09869375907111756,
+      "pearson_conf_iou": -0.0865610765695877,
+      "roc_auc_conf_lost": 0.5713981244671782,
+      "conf_mean_ok": 0.6359164710294118,
+      "conf_mean_lost": 0.6681508445410628,
+      "conf_p25_lost": 0.55630451,
+      "n_lost_runs": 2,
+      "lost_run_frames": 617
+    },
+    {
+      "sequence": "0005",
+      "n_frames": 482,
+      "mean_iou": 0.8558108593712132,
+      "sr": 0.946058091286307,
+      "pearson_conf_iou": 0.2866700354277721,
+      "roc_auc_conf_lost": 0.2467948717948718,
+      "conf_mean_ok": 0.7408288669078947,
+      "conf_mean_lost": 0.6418010173076923,
+      "conf_p25_lost": 0.57894182,
+      "n_lost_runs": 1,
+      "lost_run_frames": 26
+    },
+    {
+      "sequence": "0006",
+      "n_frames": 930,
+      "mean_iou": 0.3188619493861927,
+      "sr": 0.36129032258064514,
+      "pearson_conf_iou": 0.2247851806892138,
+      "roc_auc_conf_lost": 0.40368466410133075,
+      "conf_mean_ok": 0.6777138699404762,
+      "conf_mean_lost": 0.6111401660437711,
+      "conf_p25_lost": 0.49306915500000004,
+      "n_lost_runs": 2,
+      "lost_run_frames": 588
+    },
+    {
+      "sequence": "0007",
+      "n_frames": 660,
+      "mean_iou": 0.7241978466994022,
+      "sr": 0.8757575757575757,
+      "pearson_conf_iou": 0.5230178240046202,
+      "roc_auc_conf_lost": 0.19978479196556673,
+      "conf_mean_ok": 0.6581273758131488,
+      "conf_mean_lost": 0.48505504926829257,
+      "conf_p25_lost": 0.3498189725,
+      "n_lost_runs": 5,
+      "lost_run_frames": 69
+    },
+    {
+      "sequence": "0008",
+      "n_frames": 1456,
+      "mean_iou": 0.6153337098327334,
+      "sr": 0.7101648351648352,
+      "pearson_conf_iou": 0.7200087981745558,
+      "roc_auc_conf_lost": 0.08056413688157157,
+      "conf_mean_ok": 0.6188246722243714,
+      "conf_mean_lost": 0.41314939976303316,
+      "conf_p25_lost": 0.347739085,
+      "n_lost_runs": 17,
+      "lost_run_frames": 363
+    },
+    {
+      "sequence": "0009",
+      "n_frames": 824,
+      "mean_iou": 0.14399231648477265,
+      "sr": 0.19174757281553398,
+      "pearson_conf_iou": 0.41260782990366923,
+      "roc_auc_conf_lost": 0.1556619911050291,
+      "conf_mean_ok": 0.7075222715822785,
+      "conf_mean_lost": 0.5674872376426426,
+      "conf_p25_lost": 0.4931636225,
+      "n_lost_runs": 1,
+      "lost_run_frames": 666
+    },
+    {
+      "sequence": "0010",
+      "n_frames": 686,
+      "mean_iou": 0.6657921328925982,
+      "sr": 0.8075801749271136,
+      "pearson_conf_iou": 0.71412868558358,
+      "roc_auc_conf_lost": 0.06012744776282682,
+      "conf_mean_ok": 0.6599317150180505,
+      "conf_mean_lost": 0.3944334428787879,
+      "conf_p25_lost": 0.3333665275,
+      "n_lost_runs": 4,
+      "lost_run_frames": 123
+    }
+  ]
+}
