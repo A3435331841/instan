@@ -298,6 +298,20 @@ python scripts/eval_360vot.py --seqs 001,003 --max-frames 100
 
 ## Docker 构建与运行
 
+### 三份离线交付镜像（2026-08-10）
+
+| 镜像 | 内容 | 定位 |
+| --- | --- | --- |
+| `grt360-final:2026-08-10` | panotrack + LightFC/VitTrack ONNX（CPU，约 675 MB） | 轻量离线协议验收 |
+| `grt360-uetrack:2026-08-09` | UETrack ERP-wrap GPU 镜像（约 16.8 GB） | 高速版提交（AUC 0.5143 / 57.16 FPS） |
+| `grt360-odtrack:2026-08-10` | ODTrack ERP 三平铺 GPU 镜像（约 13.4 GB） | **精度版提交（AUC 0.5792 / SR 0.6532 / 8.99 FPS）** |
+
+ODTrack 精度版镜像入口 `integrations/odtrack/file_protocol.py`（与 UETrack 镜像
+同一文件协议：`--frames` 帧目录 + `--init` 初始框 -> `--out` results.txt），
+构建脚本 `docker/odtrack/build_odtrack_image.sh`（从 `artifacts/server_snapshot/`
+组装构建上下文）。构建、验证与运行细节见 `docs/FINAL_DELIVERY_ZH.md` 与
+`docs/DOCKER_TEST_ZH.md`。
+
 镜像基于 `python:3.12-slim`，**断网自包含**：构建期一次性安装依赖并
 COPY 源码，运行期零网络访问。在仓库根目录执行：
 

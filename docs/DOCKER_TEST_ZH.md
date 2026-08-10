@@ -31,12 +31,31 @@
 不能在这台电脑上给出真实 57.16 FPS 的 GPU 复测。57.16 FPS 来自服务器上的两套
 UETrack ERP-wrap 全量评测记录。
 
+## 精度 ODTrack GPU 镜像（2026-08-10 新增）
+
+镜像：`grt360-odtrack:2026-08-10`
+
+- 构建文件：`docker/odtrack/Dockerfile` + `docker/odtrack/requirements.txt`；
+- 构建脚本：`docker/odtrack/build_odtrack_image.sh`（从
+  `artifacts/server_snapshot/` 组装临时构建上下文，不改动全局 .dockerignore）；
+- 基础镜像：`pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime`（本地 daocloud 缓存，
+  docker.io 网络不通时用 `BASE_IMAGE=docker.m.daocloud.io/...` 覆盖）；
+- 本地镜像：约 13.4 GB；
+- 导出文件：`artifacts/grt360-odtrack_2026-08-10_linux-amd64.tar`，约 4.3 GB；
+- `--help`：通过；
+- 容器内权重 SHA-256：`2fba6dde...`，与交付清单一致；
+- CPU 结构冒烟（3 帧合成 ERP，`--force-cpu`）：通过，输出框随目标移动正确，
+  首行为初始框，12 位小数（CPU 约 0.36 FPS，仅验证管线）；
+- 本机真实 GPU 推理：与 UETrack 镜像相同限制（WSL 无 NVIDIA runtime），
+  8.99 FPS 的 GPU 全量复测需在服务器或有 NVIDIA 运行时的机器上执行。
+
 ## 旧镜像清理状态
 
 旧镜像没有被删除，避免误删仍被最终离线镜像复用的基础层。当前相关镜像包括：
 
 - `grt360-final:2026-08-10`：最终轻量离线镜像；
 - `grt360-uetrack:2026-08-09`：高速 GPU 离线镜像；
+- `grt360-odtrack:2026-08-10`：精度 GPU 离线镜像（新增）；
 - `panotrack:latest`：轻量离线镜像使用的本地基础镜像；
 - `panotrack:grt360-stage1`：旧阶段镜像，暂未删除。
 

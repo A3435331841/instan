@@ -81,3 +81,16 @@
 
 - UETrack 置信度试验：`D:/instan/pano360/reports/results/uetrack_confidence_pilot_0001_0010.json`。
 - 结论：低阈值速度较快但精度明显下降；高阈值接近 ODTrack 时速度优势消失，暂不作为最终提交架构。
+
+## 2026-08-10 补充：ODTrack 精度版提交镜像
+
+- 镜像：`grt360-odtrack:2026-08-10`（GPU，pytorch 2.3.1 / numpy 2.2.6）；
+- 导出：`D:/instan/pano360/artifacts/grt360-odtrack_2026-08-10_linux-amd64.tar`（约 4.3 GB）；
+- 构建文件：`docker/odtrack/Dockerfile`、`docker/odtrack/requirements.txt`、
+  `docker/odtrack/build_odtrack_image.sh`（构建上下文由
+  `artifacts/server_snapshot/upstream/odtrack` + 权重临时组装，权重不入 Git）；
+- 提交入口：`integrations/odtrack/file_protocol.py`（文件协议，与 UETrack 镜像同接口）；
+- 权重 SHA-256：`2fba6ddeb826014ac0bb871623406d16c3a162afbf09accb49312b526c21068e`（与上表一致）；
+- 验证：`--help` ✅；容器内权重哈希 ✅；CPU 结构冒烟 3 帧 ✅；
+  GPU 全量 120 序列复测待服务器执行（本机无 NVIDIA runtime）。
+- git 提交：`19972a5`（agent/panotrack-v2）。
