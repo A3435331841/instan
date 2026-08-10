@@ -6,7 +6,8 @@
 
 ### 1. 精度冠军：ODTrack ERP 三平铺
 
-入口：`integrations/odtrack/run_erp.py`。
+入口：`integrations/odtrack/run_erp.py`（360VOT 序列评测）与
+`integrations/odtrack/file_protocol.py`（官方提交文件协议，见下方 GPU 镜像一节）。
 
 该入口保存了完整的 360VOT 三平铺适配逻辑。ODTrack 上游源码和权重没有复制进
 GitHub，因为体积和授权不适合直接提交；运行时通过 `--odtrack-root` 与
@@ -56,8 +57,43 @@ docker run --rm --network none grt360-final:2026-08-10 \
 - 离线导出：`artifacts/grt360-uetrack-2026-08-09.tar`，约 5.99 GB；
 - 权重 SHA-256：`1d34778a41c553e3a5e17829d33df4a644f7c948b054a64f46e02fa99558b901`。
 
-因此本地有两份离线镜像：轻量最终交付镜像用于仓库代码/协议验收，GPU UETrack
-镜像用于实际均衡路线推理。两份镜像都不需要运行期联网。
+因此本地有三份镜像：轻量最终交付镜像用于仓库代码/协议验收，GPU UETrack
+镜像用于实际均衡路线推理，GPU ODTrack 镜像用于实际精度路线推理。
+三份镜像都不需要运行期联网。
+
+## ODTrack 精度版 GPU 镜像（2026-08-10 新增）
+
+精度提交版镜像，把上游源码与权重完整打进镜像，运行期零网络：
+
+- 镜像：`grt360-odtrack:2026-08-10`；
+- 构建文件：`docker/odtrack/Dockerfile` + `docker/odtrack/requirements.txt`；
+- 构建脚本：`docker/odtrack/build_odtrack_image.sh`（从
+  `artifacts/server_snapshot/` 组装临时构建上下文；国内环境无法访问 docker.io
+  时用 `BASE_IMAGE=docker.m.daocloud.io/pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime`）；
+- 提交入口：`integrations/odtrack/file_protocol.py`（与 UETrack 镜像同一
+  文件协议：`--frames` 帧目录 + `--init` 初始框 -> `--out` results.txt，
+  逐帧 x,y,w,h 12 位小数，首行为初始框）；
+- 离线导出：`artifacts/grt360-odtrack_2026-08-10_linux-amd64.tar`；
+- 权重 SHA-256：`2fba6ddeb826014ac0bb871623406d16c3a162afbf09accb49312b526c21068e`；
+- 依赖：torch 2.3.1 / numpy 2.2.6 / opencv-headless / timm 0.5.4 等，
+  基础镜像 `pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime`（Python 3.10）。
+
+运行（正式评测需 GPU）：
+
+```bash
+docker run --rm --gpus all \
+  -v /path/to/data:/data grt360-odtrack:2026-08-10 \
+  --frames /data/frames --init /data/init.txt --out /data/results.txt
+```
+
+验证状态（2026-08-10）：
+
+- ✅ `--help` 参数解析；
+- ✅ 容器内权重 SHA-256 与上表一致；
+- ✅ CPU 结构冒烟 3 帧全链路（init + 2 帧 track），输出框随目标移动正确
+  （CPU 约 0.36 FPS，仅验证管线）；
+- ⏳ GPU 全量 120 序列（8.99 FPS）需在服务器或有 NVIDIA 运行时的机器复测，
+  本机 WSL 无 NVIDIA runtime 无法本地验证。
 
 ## 评分证据
 
