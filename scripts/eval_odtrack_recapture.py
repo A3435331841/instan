@@ -5,6 +5,9 @@
 与 scripts/odtrack_360vot.py 同协议（ERP 三平铺、严格 OPE、双口径评分），
 tracker 换为 OdtrackRecaptureTracker（可靠性门控 + 球面重捕获）。
 
+这是队友在服务器上跑的主入口：判丢/重捕获参数先用默认值（本地离线
+标定的值在 score_offline_gate 输出里，跑完 Step 2 后替换）。
+
 用法（服务器，GPU）：
   python scripts/eval_odtrack_recapture.py \
     --odtrack-root /path/to/odtrack \

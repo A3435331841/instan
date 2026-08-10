@@ -1,6 +1,11 @@
 # -*- coding: utf-8 -*-
 """ODTrack + 可靠性门控 + 球面重捕获 wrapper（Step 3，决赛方案）。
 
+一句话：ODTrack 跟丢之后会一路错到底——时序记忆被污染后没有任何自愈
+机制（0047 那条 2334 帧的序列就只对了 39 帧）。这个 wrapper 就是给它
+补上"判丢 + 全图找回"的能力。组件（可靠性门控、模板记忆、多视角重检测）
+都是之前做 PanoTracker 时留下的，这里只是接到 ODTrack 上。
+
 `OdtrackRecaptureTracker` 在 ODTrack 上游 tracker 外加一层系统级状态机，
 不修改上游任何代码：
 
@@ -21,8 +26,8 @@
   - C_scale:  框面积 log 变化（相对滑动 EMA）
   - geometry_risk: 极区 |lat|>55° / seam 距离 <12%W（causal_dtp 公式）
 
-VERIFY 的 anchor 强校验是本设计防误锁的关键：false recovery 比继续
-lost 更糟，宁可多搜几次也不锁错对象。
+VERIFY 的 anchor 强校验是防误锁的关键——丢着不找只是丢分，锁错对象
+会让后面全错，我们不想在答辩时解释"为什么跟了一个长得像的"。
 
 接口对齐 BaseTracker：init(image, bbox) / update(image) -> dict。
 """

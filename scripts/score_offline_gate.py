@@ -4,7 +4,8 @@
 
 输入 compute_odtrack_signals.py 产出的逐帧信号 + ODTrack 结果 + GT，做：
 
-1. 60/60 留出划分（序列号奇偶，划分落盘到输出 JSON）；
+1. 60/60 留出划分（序列号奇偶，划分落盘到输出 JSON）——拿全部 120 条
+   调参再报告成绩属于自欺欺人，这条纪律是从 LightFC 全量翻车的教训里来的；
 2. 标定集上扫阈值，选 lost_run_recall / false_alarm 的 F1 最优门控
    （连续 run_len 帧可靠性 R < 阈值 -> 判 lost）；
 3. 验证集上报告：帧级 ROC-AUC、失锁段召回率、正常帧误报率；

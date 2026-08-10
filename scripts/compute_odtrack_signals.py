@@ -3,15 +3,15 @@
 """离线判丢信号计算器（Step 2，纯 CPU）。
 
 对 120 条已有 ODTrack 逐帧结果，计算每帧的判丢代理信号（不依赖模型内部值，
-不需要 GPU 重跑）：
+不需要 GPU 重跑——服务器到期后我们本地唯一能做的就是这种事）：
 
   C_motion   预测框中心与圆周恒速外推中心的偏差（归一化到框对角线）
   C_scale    框面积 log 变化 vs 滑动历史 EMA
   geometry   ERP 极区风险 + 接缝风险（复用 causal_dtp 公式）
   anchor_ncc 预测框 crop 与首帧 GT crop 的 NCC 相似度（可选，--with-ncc，
-             需解码帧，较慢）
+             需解码帧，4K JPEG 全量约 2-4 小时，跑着别急）
 
-输出：<out>/<seq>/signals.csv（逐帧 signal 列）+ 汇总 JSON。
+输出：<out>/<seq>/signals.csv（逐帧 signal 列）+ meta.json。
 后续由 `scripts/score_offline_gate.py` 用它做 60/60 留出标定与判丢评估。
 """
 import argparse
