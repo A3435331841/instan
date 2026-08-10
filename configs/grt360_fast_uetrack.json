@@ -1,0 +1,20 @@
+{
+  "名称": "UETrack ERP-wrap（高速基线，必须保留）",
+  "入口": "integrations/uetrack/run_erp.py",
+  "参数": {
+    "tracker": "uetrack",
+    "parameter": "uetrack_base",
+    "erp_wrap": true,
+    "search_factor": 4.0,
+    "search_size": 224,
+    "template_factor": 2.0,
+    "template_size": 112,
+    "window": true,
+    "moe_experts": 8,
+    "moe_layer": [5]
+  },
+  "120序列AUC": 0.5142648726,
+  "120序列SR": 0.5776136689,
+  "FPS": 57.1606,
+  "定位": "高速独立运行基线，也是后续蒸馏学生模型的起点。"
+}

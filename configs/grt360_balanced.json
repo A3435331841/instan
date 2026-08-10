@@ -1,5 +1,5 @@
 {
-  "名称": "GRT360-Causal-DTP-ERP（均衡候选）",
+  "名称": "GRT360-Causal-DTP-ERP（创新实验版，不替代两套基线）",
   "入口": "scripts/fuse_causal_dtp_erp.py",
   "教师": "ODTrack ERP 三平铺",
   "学生": "UETrack ERP-wrap",
@@ -7,5 +7,5 @@
   "AUC": 0.5792135073,
   "SR": 0.6531941586,
   "FPS": 8.9945,
-  "说明": "当前为保守预测级原型；真正 KV-cache、Token 压缩和蒸馏尚未进入模型。"
+  "说明": "当前保守路由用于保护 ODTrack 精度；UETrack ERP-wrap 高速基线单独保留，后续创新目标是训练学生模型后减少教师调用。"
 }

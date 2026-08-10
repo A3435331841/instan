@@ -31,6 +31,7 @@ offline/
 reports/results/candidate_v2_score/
 reports/results/candidate_v3_score/
 reports/results/od_1_10_check/
+reports/results/sparse_teacher_k/
 
 # ============================
 # Python
