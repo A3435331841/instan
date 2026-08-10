@@ -139,7 +139,7 @@ python scripts/eval_odtrack_recapture.py \
 | 验证 | 结果 |
 |---|---|
 | last_pred_iou 与失锁相关性（10 条） | Pearson +0.391；判丢区分度 0.747；方向正确 |
-| 离线判丢门控（纯框信号，120 条 60/60） | 验证集失锁段召回 0.695，误报 0.284（NCC 应进一步降误报） |
+| 离线判丢门控（120 条 60/60） | 纯框信号：召回 0.695 / 误报 0.284；含 NCC（w_ncc=0.5）：召回 0.645 / 误报 0.242（推荐默认）；w_ncc=1.0 激进版召回 0.776 / 误报 0.359，见 Step 2 |
 | recapture 状态机 CPU 冒烟（3 项测试） | 全绿：正常→lost→recovered→ok；目标消失持续 lost；远跳 VERIFY 拒绝 |
 | 重捕获链路 | redetect_v3 在合成帧命中移动目标（score 0.55），VERIFY+reinit 生效 |
 

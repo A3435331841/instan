@@ -1,12 +1,15 @@
 # panotrack —— 影石全景视频智能跟踪赛道 · 360° ERP 实时单目标跟踪原型
 
-> **项目状态**：Stage 3 进行中，官方 120 序列测试集已下载对接。当前推荐方案：**LightFC**（onnxruntime 双子图，全帧跟踪，CPU 实时，先进水平 AUC 0.618）。
+> **项目状态**：初赛已提交（2026-08-10）。120 序列全量赛马完成，提交方案为
+> **ODTrack ERP 三平铺**（AUC 0.5792 / SR 0.6532，详见 `reports/STAGE_RESULTS_2026-08-09.md`）。
+> LightFC 曾为推荐方案（代表序列 AUC 0.618），全量评测后仅 0.31，已降级为历史方案。
 
 武汉大学 4 人学生队参赛作品。面向 360° ERP（等距柱状投影）全景视频的实时单目标跟踪：
 **球面状态层预测 → tangent 局部切图 → 轻量跟踪器 → 置信度判丢 → 逐级扩大 FoV 重试 → 全局重检测**，
 最终以 Docker 镜像形式断网自包含提交。
 
-运行环境：Python 3.12，生产仅依赖 **numpy / Pillow / scipy + onnxruntime**（禁止 cv2、torch、yaml、pytest；torch 仅本地 lightfc_cpu 验证用）。
+运行环境：Python 3.12，轻量线生产仅依赖 **numpy / Pillow / scipy + onnxruntime**（禁止 cv2、torch、yaml、pytest；torch 仅本地 lightfc_cpu 验证用）。
+ODTrack/UETrack 提交镜像走独立依赖面（torch/cv2/timm，见 `integrations/` 与 `docs/FINAL_DELIVERY_ZH.md`）。
 
 ---
 
@@ -17,7 +20,7 @@
 | Stage 1 | ✅ 完成 | BFoV 几何模块、NCC 跟踪器、合成数据生成、基础 pipeline |
 | Stage 2 | ✅ 完成 | 集成 VitTrack、全局重检测 v2、自适应 patch_size、状态阻尼 |
 | Stage 2 验证 | ✅ 完成 | 发现 BFoV 框架漂移问题；Direct ERP 方案 AUC 0.26 / FPS 155 |
-| Stage 3 | 🔄 进行中 | 官方 120 序列下载完成、LightFC 接入(先进水平)、ONNX 生产化、Docker 部署就绪 |
+| Stage 3 | ✅ 完成 | 120 序列全量赛马（ODTrack 0.5792 精度冠军）、初赛提交（ODTrack 精度版镜像）、决赛重捕获方案代码就绪 |
 
 **关键发现**：BFoV 框架的恒定角速度状态预测会累积误差，到第 7-8 帧时完全漂移。
 Direct ERP 方案（绕过 BFoV）在精度和速度上均显著优于传统框架；
@@ -368,7 +371,7 @@ docker run --rm -i --entrypoint /entrypoint.sh panotrack:latest trax < cmds.txt
 
 ---
 
-## LightFC 接入指南（已接入，当前推荐方案）
+## LightFC 接入指南（历史方案：代表序列先进水平，全量评测后已降级）
 
 LightFC 已作为**全帧跟踪器**接入（同 Direct ERP 思路，不走 BFoV 切图），
 代表序列全帧评测平均 **AUC 0.618 / SR@0.5 0.749 / CPU 约 10 FPS**（先进水平）。
@@ -563,4 +566,4 @@ A: 用 `tools_local/` 下的脚本（如 `debug_seq0036.py`）或在 `tests/` �
 
 ---
 
-> **最后更新**：2026-07-25 | **当前阶段**：Stage 3 官方数据对接中 | **推荐方案**：LightFC
+> **最后更新**：2026-08-10 | **当前阶段**：初赛已提交（ODTrack 精度版 0.5792）| **决赛方向**：ODTrack + 可靠性门控 + 球面重捕获（见 `docs/ODTRACK_RECAPTURE_PLAN_ZH.md`）

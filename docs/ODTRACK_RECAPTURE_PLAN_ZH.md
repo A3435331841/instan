@@ -65,12 +65,12 @@ OdtrackRecaptureTracker
                     ┌────────────────────────────────────────┐
    ERP 帧 ──► ODTrack track ──► 框 + last_pred_iou ──► ReliabilityGate
                     │                                        │
-                    │                                  高可靠（R ≥ τ_ok）
+                    │                                  高可靠（R ≥ threshold）
                     │                                        ▼
                     │                            输出框 + TemplateMemory.add()
                     │                                （门控写入，anchor 永不被覆盖）
                     │
-                    │ 低可靠（R < τ_ok）→ 连续 N 帧计数
+                    │ 低可靠（R < threshold）→ 连续 N 帧计数
                     ▼
                 LOST 状态
                     │
@@ -111,13 +111,13 @@ OdtrackRecaptureTracker
   1. 服务器重跑 120 条，输出每条 `confidence.txt`（`last_pred_iou`），
      同时落盘逐帧框（已有）；→ 全量置信度分布可得；
   2. 将 120 条按序**奇偶对半分**：60 条标定集 / 60 条验证集；
-  3. 在标定集上扫描：`τ_ok`、连续低可靠帧数 N、重捕获间隔 K；
+  3. 在标定集上扫描：`threshold`、连续低可靠帧数 N、重捕获间隔 K；
   4. 验证集上报告最终成绩；标定集成绩仅作参考，报告必须注明划分。
 - 若奇偶划分不够稳（同源分布），可改用按失锁严重度分层抽样，但必须落盘划分文件。
 
 ### 3.3 滞回与防抖
 
-- 连续 N 帧 R < τ_ok 才进入 LOST（N 默认 5，标定）；
+- 连续 N 帧 R < threshold（标定值，w_ncc=0.5 档为 0.55）才进入 LOST（N 默认 5，标定）；
 - 找回后经 OBSERVE 观察期（observe_frames=3）才回 NORMAL，观察期再次失锁
   会直接回到 LOST（见 §4.3）——这就是恢复侧的防抖，代码里没有单独的
   "恢复后 M 帧不重触发"计数器；
@@ -140,11 +140,15 @@ OdtrackRecaptureTracker
 候选框 `(x,y,w,h), score` 必须同时满足：
 
 1. **分数门槛**：NCC score ≥ min_score（默认 0.45，标定）；
-2. **anchor 一致性**：候选框 crop 与 anchor 的 NCC ≥ 0.5（锚点强校验，防锁错相似目标）；
+2. **anchor 一致性**：候选框 crop 与 anchor 的**归一化相似度** `(sim+1)/2 ≥
+   anchor_min_sim=0.5`（即原始 NCC sim ≥ 0；锚点校验，防锁错相似目标）。
+   注意别把"0.5"理解成原始 NCC ≥ 0.5——4K 实测正常帧原始 NCC 均值仅约
+   0.22，原始 NCC 阈值没有意义（详见交接手册"VERIFY 的诚实边界"一节）；
 3. **运动合理性**：候选中心与失锁前最后位置/恒速外推的球面距离 ≤ 合理上限
    （默认 ≤ 90°，防瞬时全图乱跳）；
-4. **双模板一致**：anchor 与至少一个 dynamic 模板在候选位置的响应都高
-   （可选，默认关闭，作为 ablation 项）。
+4. **双模板一致**（方案预留，**v1 未实现**）：anchor 与至少一个 dynamic
+   模板在候选位置的响应都高才放行——v1 的 VERIFY 只有 anchor 单模板校验，
+   双模板一致性留给服务器跑完 Step 3 后按需加（作为 ablation 项）。
 
 任一不满足 → 视为未命中，**保持 LOST**（false recovery 比继续 lost 更糟，handoff §45）。
 
@@ -152,7 +156,7 @@ OdtrackRecaptureTracker
 
 - 用候选框**重新 `tracker.initialize`**（三平铺帧 + 候选框移到中间副本），
   而不是 resume：彻底清空被污染的 dense temporal memory；
-- 重建后置 `follow_count=0`，连续 3 帧 R ≥ τ_ok 才回 NORMAL；
+- 重建后置 `follow_count=0`，连续 3 帧 R ≥ threshold 才回 NORMAL；
 - 若 3 帧内再次失锁 → 回到 LOST，且该候选模板被标记（同一位置不重复尝试）。
 
 ---
@@ -162,9 +166,9 @@ OdtrackRecaptureTracker
 | 步骤 | 内容 | 验证门槛 | 环境 |
 |---|---|---|---|
 | **Step 1** | 服务器重跑 120 条，输出 `confidence.txt`（last_pred_iou）全量落盘；绘制置信度与逐帧 IoU 的相关性 | 相关系数 > 0.3；失锁段置信度显著低于正常段（可视化 5 个失锁序列确认） | 服务器 GPU |
-| **Step 2** | `recapture.py` 骨架 + ReliabilityGate 接线；60 条标定集上扫 τ_ok/N/K | 标定集上判丢召回率（真实失锁帧被标出）≥ 0.8，误报率 ≤ 0.2 | 服务器 |
+| **Step 2** | `recapture.py` 骨架 + ReliabilityGate 接线；60 条标定集上扫 threshold/N/K | 标定集上判丢召回率（真实失锁帧被标出）≥ 0.8，误报率 ≤ 0.2 | 服务器 |
 | **Step 3** | 重捕获链路（redetect_v3 + VERIFY + REINIT）；5 个失锁序列（0047/0100/0041/0094/0117）逐条调试 | 每条找回 ≥ 1 次且后续 ≥ 50 帧不再次失锁；误锁 = 0 | 本地 + 服务器 |
-| **Step 4** | 60 条验证集严格评分（`score_external_results.py` 同协议）；与 ODTrack 基线并表 | 验证集 AUC ≥ 基线 +0.02；正常序列（标定集上 AUC>0.5 的）无回退 | 服务器 |
+| **Step 4** | 60 条验证集严格评分（`score_external_results.py` 同协议）；与验证集上的纯 ODTrack 基线并表 | 验证集 AUC ≥ **同一 60 条验证集上的 ODTrack 基线** +0.02（注意不是全量 0.5792——验证集子集均值会不同，对比口径必须一致）；正常序列无回退 | 服务器 |
 | **Step 5**（可选） | ablation：关 anchor 校验 / 关模板记忆 / 换 K | 每个开关的独立贡献可解释 | 服务器 |
 
 ## 6. 评测与验收（与初赛同协议）
@@ -190,8 +194,8 @@ OdtrackRecaptureTracker
 
 | 时间 | 事项 |
 |---|---|
-| 8/11 | Step 1（全量置信度采集 + 相关性分析） |
-| 8/12 | Step 2（判丢门控 + 阈值标定） |
+| 8/11 | Step 1 服务器全量置信度采集（相关性分析本地已完成，见 §10） |
+| 8/12 | Step 2（判丢门控 + 阈值标定，含服务器 confidence 加入 C_visual 后重标） |
 | 8/13 | Step 3（重捕获链路调试，5 条失锁序列） |
 | 8/14 | Step 4（验证集严格评分）+ Step 5 ablation + 决策（提升则更新答辩材料，否则维持初赛版） |
 
