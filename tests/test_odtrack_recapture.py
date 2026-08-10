@@ -22,23 +22,33 @@ from integrations.odtrack.recapture import OdtrackRecaptureTracker  # noqa: E402
 
 
 class FakeTracker:
-    """可编程假 ODTrack：按剧本返回框与 last_pred_iou。"""
+    """可编程假 ODTrack：按剧本返回框与 last_pred_iou。
 
-    def __init__(self, boxes, ious, reinit_box=None, reinit_iou=0.8):
+    reinit_boxes 支持 reinit 后多帧剧本（列表的列表）；为 None 时
+    退化为单框 reinit_box 语义。
+    """
+
+    def __init__(self, boxes, ious, reinit_box=None, reinit_iou=0.8,
+                 reinit_boxes=None):
         self.boxes = list(boxes)
         self.ious = list(ious)
         self.reinit_box = reinit_box
         self.reinit_iou = float(reinit_iou)
+        self.reinit_boxes = reinit_boxes
         self.idx = 0
         self.last_pred_iou = 1.0
         self.n_init = 0
 
     def initialize(self, tiled, info):
         self.n_init += 1
-        if self.reinit_box is not None and self.n_init > 1:
+        if self.n_init > 1:
             self.idx = 0
-            self.boxes = [self.reinit_box]
-            self.ious = [self.reinit_iou]
+            if self.reinit_boxes is not None:
+                self.boxes = [list(b) for b in self.reinit_boxes]
+                self.ious = [self.reinit_iou] * len(self.boxes)
+            elif self.reinit_box is not None:
+                self.boxes = [self.reinit_box]
+                self.ious = [self.reinit_iou]
         self.last_pred_iou = 1.0
 
     def track(self, tiled):
@@ -168,8 +178,42 @@ def test_lost_placeholder_when_no_target():
     print('PASS test_lost_placeholder_when_no_target')
 
 
+def test_observe_fail_returns_to_lost():
+    """找回后观察期内再次失锁 -> 回 LOST（防"锁错对象"的第二道闸）。
+
+    剧本：复用 test_recapture_state_machine 已验证的重捕获触发条件
+    （motion_max_deg=120，目标在 240），但 reinit 后 ODTrack 继续跟错
+    （reinit_box 在错误位置 + 低可靠），观察期第一帧 R 低应立即回 LOST，
+    而不是硬撑到观察期结束。
+    """
+    W, H = 512, 256
+    init_box = [168.0, 108.0, 24.0, 24.0]
+    bad = [[60.0, 100.0, 24.0, 24.0], [100.0, 60.0, 24.0, 24.0]]
+    bad_boxes = [bad[i % 2] for i in range(5)]
+    fake = FakeTracker([init_box] * 5 + bad_boxes,
+                       [0.8] * 5 + [0.05] * 5,
+                       reinit_boxes=[[60.0, 100.0, 24.0, 24.0],
+                                    [100.0, 60.0, 24.0, 24.0],
+                                    [60.0, 100.0, 24.0, 24.0],
+                                    [100.0, 60.0, 24.0, 24.0]],
+                       reinit_iou=0.05)
+    tracker = OdtrackRecaptureTracker(fake, run_len=3, search_interval=1,
+                                      observe_frames=3, motion_max_deg=120.0)
+    frames = [make_frame(W, H, target_cx=240) for _ in range(15)]
+    tracker.init(frames[0], init_box)
+    statuses = []
+    for i in range(1, 15):
+        out = tracker.update(frames[i])
+        statuses.append(out['status'])
+    assert 'recovered' in statuses, '重捕获应触发'
+    idx = statuses.index('recovered')
+    assert 'lost' in statuses[idx:], '观察期失锁应立即回 LOST'
+    print('PASS test_observe_fail_returns_to_lost')
+
+
 if __name__ == '__main__':
     test_recapture_state_machine()
     test_lost_placeholder_when_no_target()
     test_verify_rejects_far_jump()
+    test_observe_fail_returns_to_lost()
     print('ALL TESTS PASSED')
