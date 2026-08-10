@@ -9,6 +9,7 @@
   - 'direct_erp': 直接ERP跟踪，绕过BFoV框架 (推荐用于小目标和漂移敏感场景)
   - 'lightfc_onnx': LightFC via onnxruntime 双子图 (生产部署,CPU 实时)
   - 'lightfc_cpu': LightFC via torch CPU (本地验证用)
+  - 'spherical_memory': GRT360-Spherical-Memory（需训练好的 checkpoint）
 """
 from .base import BaseTracker
 from .ncc import NCCTracker
@@ -27,6 +28,7 @@ _INPUT_SPACE = {
     'direct_erp': 'erp_full',
     'lightfc_onnx': 'erp_full',
     'lightfc_cpu': 'erp_full',
+    'spherical_memory': 'local_patch',
 }
 
 
@@ -87,10 +89,13 @@ def create_tracker(name='ncc', **kwargs):
             print(f'[Factory] lightfc_cpu init failed, fallback to ncc_v2: {e}',
                   file=__import__('sys').stderr)
             return NCCTrackerV2(**kwargs)
+    if key == 'spherical_memory':
+        from .spherical_memory import SphericalMemoryTracker
+        return SphericalMemoryTracker(**kwargs)
     if key == 'lightfc':
         raise NotImplementedError(
             "请用 'lightfc_onnx'(onnxruntime 生产)或 'lightfc_cpu'(torch 本地)")
     raise ValueError(
         f"未知跟踪器名称: {name!r}，当前可用: 'ncc', 'ncc_v2', 'vittrack_onnx', "
-        f"'vittrack_cv2', 'direct_erp', 'lightfc_onnx', 'lightfc_cpu'"
+        f"'vittrack_cv2', 'direct_erp', 'lightfc_onnx', 'lightfc_cpu', 'spherical_memory'"
     )

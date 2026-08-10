@@ -488,7 +488,11 @@ class PanoTracker:
         cut = self._make_cut(tb)
         patch, _, _ = self._cut(frame, cut)
         lb = _erp_bbox_to_local(bbox, cut, ps, ps, W, H)
+        if hasattr(self._tracker, 'set_geometry'):
+            self._tracker.set_geometry(cut)
         self._tracker.init(_highpass(patch, cfg['hp_sigma']), lb)
+        if hasattr(self._tracker, 'set_geometry'):
+            self._tracker.set_geometry(cut)
         self._patch_bfov = cut
         self._template = self._crop_template(frame, bbox)
         self._lost_count = 0
@@ -521,6 +525,8 @@ class PanoTracker:
             cut = self._make_cut(pred, fov_scale=scale)
             patch, _, _ = self._cut(frame, cut)
             self._migrate_tracker(cut)
+            if hasattr(self._tracker, 'set_geometry'):
+                self._tracker.set_geometry(cut)
             hp = _highpass(patch, cfg['hp_sigma'])
             res = self._tracker.update(hp)
             # GRT-360：开启时用 S² 运动先验软调制得分（feature-flag）
@@ -577,6 +583,10 @@ class PanoTracker:
                 patch, _, _ = self._cut(frame, cut)
                 lb = _erp_bbox_to_local(rb, cut, ps, ps, W, H)
                 self._tracker.init(_highpass(patch, cfg['hp_sigma']), lb)  # 重建局部模板
+                if hasattr(self._tracker, 'set_geometry'):
+                    self._tracker.set_geometry(cut)
+                if hasattr(self._tracker, 'set_geometry'):
+                    self._tracker.set_geometry(cut)
                 self._patch_bfov = cut
                 self._template = self._crop_template(frame, rb)
                 self._lost_count = 0

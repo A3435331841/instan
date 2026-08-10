@@ -1,0 +1,19 @@
+{
+  "tracker": "spherical_memory",
+  "model_path": "artifacts/grt360_spherical_memory.pt",
+  "device": "auto",
+  "channels": 24,
+  "template_size": 64,
+  "update_threshold": 0.45,
+  "patch_size": 255,
+  "sr_ratio": 3.0,
+  "sr_min_fov": 20.0,
+  "lost_score": 0.25,
+  "lost_psr": 3.0,
+  "lost_apce": 0.5,
+  "redetect_interval": 3,
+  "max_lost_frames": 30,
+  "hp_sigma": 0.0,
+  "refine": false,
+  "motion_prior": true
+}
