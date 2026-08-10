@@ -49,6 +49,16 @@ docker run --rm --network none grt360-final:2026-08-10 \
 权重仍需按其各自授权放在宿主机或专用 GPU 镜像中，不能假装已经包含在轻量 CPU
 离线镜像里。
 
+本机还保留了已经构建好的 GPU 版 UETrack ERP-wrap 镜像，包含固定的上游源码、
+权重和 CLIP 缓存：
+
+- 镜像：`grt360-uetrack:2026-08-09`；
+- 离线导出：`artifacts/grt360-uetrack-2026-08-09.tar`，约 5.99 GB；
+- 权重 SHA-256：`1d34778a41c553e3a5e17829d33df4a644f7c948b054a64f46e02fa99558b901`。
+
+因此本地有两份离线镜像：轻量最终交付镜像用于仓库代码/协议验收，GPU UETrack
+镜像用于实际均衡路线推理。两份镜像都不需要运行期联网。
+
 ## 评分证据
 
 - `reports/results/odtrack_120_score/bakeoff.json`
