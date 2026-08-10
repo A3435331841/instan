@@ -19,6 +19,12 @@
 
 LoRAT 压缩包已解压到 `artifacts/server_snapshot/code/lorat_source/`，便于离线查阅。完整赛马目录还包含 1771 个服务器文件；本地快照目录中已覆盖服务器文件，另保留了本地先前生成的少量合并输出。
 
+服务器上的完整上游源码也已保存到 `artifacts/server_snapshot/upstream/`：
+
+- `odtrack/`：226 个文件，含上游代码和训练权重副本。
+- `UETrack/`：254 个文件，含实验配置和模型代码。
+- `lorat/`：1028 个文件，含 LoRAT 训练/评测源码。
+
 ## GitHub 中已有的内容
 
 - `panotrack/` 核心代码、360VOT 数据协议、评测指标和所有融合器实现。
@@ -32,7 +38,7 @@ GitHub 不存放上述大权重、逐帧结果和 Docker tar；这些路径由 `
 
 - `/data/projects/instan/data360`：约 62GB 数据集。仓库只保留下载/校验脚本和 `data360/` 说明，不复制数据本体。
 - 服务器运行环境缓存、Python `__pycache__`、临时日志和重复的中间文件。
-- `/data/projects/instan_check/odtrack`、`UETrack` 的完整上游目录：本项目已保存可复现所需的适配器；ODTrack/UETrack 的上游源码和许可证应以其官方仓库为准，不将带训练产物的整目录塞入 GitHub。
+- 上游源码不直接提交 GitHub：本地已保存完整快照，但其许可证和上游版本仍应以官方仓库为准，不将带训练产物的整目录塞入 GitHub。
 
 ## 本地复核命令
 
