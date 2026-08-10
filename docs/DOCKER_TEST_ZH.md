@@ -49,6 +49,20 @@ UETrack ERP-wrap 全量评测记录。
 - 本机真实 GPU 推理：与 UETrack 镜像相同限制（WSL 无 NVIDIA runtime），
   8.99 FPS 的 GPU 全量复测需在服务器或有 NVIDIA 运行时的机器上执行。
 
+## 2026-08-10 镜像存储清空事件记录
+
+当天复查时发现 **Docker 全部镜像消失**（含三份提交镜像与基础镜像，
+Images/Containers/Build Cache 全空，疑似 Docker Desktop 存储被整体清理）。
+导出的 tar 完好，已全部恢复：
+
+- `docker load -i artifacts/grt360-odtrack_2026-08-10_linux-amd64.tar` ✅
+- `docker load -i artifacts/grt360-final-2026-08-10.tar` ✅
+- `docker load -i artifacts/grt360-uetrack-2026-08-09.tar` ✅
+
+**教训：tar 是唯一权威备份**。基础镜像（pytorch 2.3.1 / python 3.12-slim）也被清空，
+今后如需重建镜像需重新拉取基础镜像（docker.io 网络受限时用
+`docker.m.daocloud.io/...`）。恢复后镜像 tag 与内容与清理前一致（已抽查）。
+
 ## 旧镜像清理状态
 
 旧镜像没有被删除，避免误删仍被最终离线镜像复用的基础层。当前相关镜像包括：
