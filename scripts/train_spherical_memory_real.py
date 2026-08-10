@@ -103,14 +103,18 @@ def main(argv=None):
     pairs = build_pairs(args.data, args.max_seqs, args.max_pairs, args.downscale, args.seed)
     if not pairs:
         raise SystemExit("没有找到可训练的 360VOT 相邻帧")
+    # 只解码一次。反复从 4K 原图取 patch 会让 GPU 长时间空转，浪费两张卡。
+    print(f"preparing cached patches: {len(pairs)}", flush=True)
+    cached = [sample(x, 64, 128) for x in pairs]
+    print("patch cache ready", flush=True)
     model = SphericalMemoryNet(channels=24).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-4)
     history = []
     for epoch in range(1, args.epochs + 1):
-        random.shuffle(pairs)
+        random.shuffle(cached)
         total = 0.0
-        for start in range(0, len(pairs), args.batch):
-            batch = [sample(x, 64, 128) for x in pairs[start:start + args.batch]]
+        for start in range(0, len(cached), args.batch):
+            batch = cached[start:start + args.batch]
             t, s, y, g = zip(*batch)
             t = torch.tensor(np.stack(t), device=device)
             s = torch.tensor(np.stack(s), device=device)
@@ -120,8 +124,8 @@ def main(argv=None):
             losses = model.loss(out, y)
             opt.zero_grad(set_to_none=True); losses["total"].backward(); opt.step()
             total += float(losses["total"].item()) * len(batch)
-        avg = total / len(pairs); history.append(avg)
-        print(f"[epoch {epoch}/{args.epochs}] pairs={len(pairs)} loss={avg:.5f}", flush=True)
+        avg = total / len(cached); history.append(avg)
+        print(f"[epoch {epoch}/{args.epochs}] pairs={len(cached)} loss={avg:.5f}", flush=True)
     out_path = Path(args.out); out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(model.cpu().state_dict(), out_path)
     out_path.with_suffix(".json").write_text(json.dumps({"args": vars(args), "loss": history},

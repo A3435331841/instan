@@ -490,7 +490,9 @@ class PanoTracker:
         lb = _erp_bbox_to_local(bbox, cut, ps, ps, W, H)
         if hasattr(self._tracker, 'set_geometry'):
             self._tracker.set_geometry(cut)
-        self._tracker.init(_highpass(patch, cfg['hp_sigma']), lb)
+        init_patch = patch if str(cfg.get('tracker', '')).lower() == 'spherical_memory' \
+            else _highpass(patch, cfg['hp_sigma'])
+        self._tracker.init(init_patch, lb)
         if hasattr(self._tracker, 'set_geometry'):
             self._tracker.set_geometry(cut)
         self._patch_bfov = cut
@@ -527,8 +529,9 @@ class PanoTracker:
             self._migrate_tracker(cut)
             if hasattr(self._tracker, 'set_geometry'):
                 self._tracker.set_geometry(cut)
-            hp = _highpass(patch, cfg['hp_sigma'])
-            res = self._tracker.update(hp)
+            tracker_patch = patch if str(cfg.get('tracker', '')).lower() == 'spherical_memory' \
+                else _highpass(patch, cfg['hp_sigma'])
+            res = self._tracker.update(tracker_patch)
             # GRT-360：开启时用 S² 运动先验软调制得分（feature-flag）
             if self._motion_prior is not None:
                 obs_vec = self._local_bbox_dir(res['bbox'], cut)
@@ -538,7 +541,7 @@ class PanoTracker:
                 res['score'] = score
             last_res, last_cut = res, cut
             if self._confident(res):
-                accepted = (res, cut, hp)
+                accepted = (res, cut, tracker_patch)
                 break
 
         if accepted is not None:
