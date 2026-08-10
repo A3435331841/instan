@@ -49,6 +49,16 @@ def _circ_dist(a: float, b: float, width: float) -> float:
     return abs(_circ_delta(a, b, width))
 
 
+def _spherical_angle_deg(lon1, lat1, lon2, lat2):
+    """两经纬度间的球面角距（度，Haversine 形式，高纬/极点正确）。"""
+    lon1, lat1 = np.deg2rad(lon1), np.deg2rad(lat1)
+    lon2, lat2 = np.deg2rad(lon2), np.deg2rad(lat2)
+    dlon = lon2 - lon1
+    dlat = lat2 - lat1
+    a = np.sin(dlat / 2.0) ** 2 + np.cos(lat1) * np.cos(lat2) * np.sin(dlon / 2.0) ** 2
+    return float(2.0 * np.degrees(np.arctan2(np.sqrt(a), np.sqrt(1.0 - a))))
+
+
 def _geometry_risk(box: Sequence[float], width: float, height: float) -> float:
     """极区/接缝几何风险（与 causal_dtp._geometry_risk 一致，0~1）。"""
     cy = float(box[1]) + 0.5 * float(box[3])
@@ -224,9 +234,8 @@ class OdtrackRecaptureTracker:
             lon = _center(candidate, self._erp_w) / self._erp_w * 360.0 - 180.0
             lat = 90.0 - (float(candidate[1]) + 0.5 * float(candidate[3])
                           ) / self._erp_h * 180.0
-            dlon = abs((lon - self._lost_anchor_pos[0] + 180.0) % 360.0 - 180.0)
-            dlat = abs(lat - self._lost_anchor_pos[1])
-            ang = float(np.hypot(dlon, dlat))
+            ang = _spherical_angle_deg(
+                self._lost_anchor_pos[0], self._lost_anchor_pos[1], lon, lat)
             if ang > self.motion_max_deg:
                 return False
         return True

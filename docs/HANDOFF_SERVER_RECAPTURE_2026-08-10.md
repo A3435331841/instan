@@ -106,3 +106,17 @@ python scripts/eval_odtrack_recapture.py \
 - 8/14 前完成 Step 1-3 并回报 Step 4 数据；
 - 8/14 晚由队长决策：提升则更新决赛答辩材料（PPT 增补"可靠性门控+重捕获"一页），
   否则维持初赛版答辩。
+
+## 7. 决赛若采用重捕获版：提交入口改造（决策通过后再做）
+
+初赛镜像（`grt360-odtrack:2026-08-10`，入口 `integrations/odtrack/file_protocol.py`）
+已冻结，**决赛若采用重捕获版，需在镜像重建时同步改造**：
+
+1. `file_protocol.py` 增加 `--recapture` 开关：构造 `OdtrackRecaptureTracker`
+   替代裸 `ODTrack`（判丢/重捕获参数用 Step 2 标定的阈值）；
+2. `docker/odtrack/Dockerfile` 需新增 COPY `integrations/odtrack/recapture.py`
+   与 `panotrack/pipeline/memory.py`、`redetect_v3.py`（重捕获依赖）；
+3. 重建镜像 + CPU 冒烟（`--force-cpu` 3 帧）+ 服务器 GPU 全量复测后，
+   更新 `deliverables/SUBMISSION_2026-08-10/` 与交付清单；
+4. 注意：重捕获的 redetect_v3 是 numpy/PIL 实现（无 torch 依赖），
+   镜像依赖面不变，体积增加可忽略。
