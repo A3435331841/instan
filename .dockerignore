@@ -9,3 +9,13 @@ demo/
 runs/
 *.md
 !README.md
+!docs/
+!docs/**
+!integrations/
+!integrations/**
+!scripts/
+!scripts/**
+!reports/
+!reports/**
+offline/
+artifacts/

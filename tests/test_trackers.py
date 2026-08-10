@@ -111,12 +111,12 @@ def test_factory_and_contract():
     assert isinstance(tr, NCCTracker) and isinstance(tr, BaseTracker)
     tr2 = create_tracker('ncc', lr=0.05)
     assert abs(tr2.lr - 0.05) < 1e-12
-    # lightfc：预留接口，必须抛 NotImplementedError 且消息符合契约
+    # lightfc：通用名必须抛 NotImplementedError，引导用户选具体后端
     try:
         create_tracker('lightfc')
         raise AssertionError('lightfc 应抛出 NotImplementedError')
     except NotImplementedError as e:
-        assert 'LightFC' in str(e) and '接口已预留' in str(e)
+        assert 'lightfc_onnx' in str(e) and 'lightfc_cpu' in str(e)
     # 未知名称
     try:
         create_tracker('xxx')

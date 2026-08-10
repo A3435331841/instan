@@ -1,0 +1,20 @@
+# GRT-360 ODTrack 精度版镜像依赖
+# numpy 2.2.6：opencv-python-headless 4.12 强制 numpy>=2；
+# ODTrack 推理路径无 numpy 1.x 专属 API（np.int 仅用于 GOT-10k/TrackingNet
+# 标注转换工具，不进推理链路），与服务器 uetrack 环境一致
+numpy==2.2.6
+opencv-python-headless==4.12.0.88
+Pillow==12.2.0
+scipy==1.15.3
+pandas==2.3.3
+easydict==1.13
+einops==0.8.2
+yacs==0.1.8
+timm==0.5.4
+pycocotools==2.0.7
+tensorboardX==2.6.5
+lmdb==2.3.0
+jpeg4py==0.1.4
+six==1.16.0
+tqdm
+matplotlib>=3.9.0

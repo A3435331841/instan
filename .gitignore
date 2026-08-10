@@ -10,17 +10,28 @@ models/
 data360/
 !data360/README_HF.md
 !data360/360vots-info.csv
+*.tgz
+*.tar.gz
 
 # ============================
 # 运行输出
 # ============================
 runs/
 !runs/.gitkeep
+reports/results/*_results_0001_0120.tar.zst
 
 # ============================
 # 本地调试工具（个人痕迹）
 # ============================
 tools_local/
+
+# 本地离线镜像导出与冒烟测试文件（不提交大二进制）
+artifacts/
+offline/
+reports/results/candidate_v2_score/
+reports/results/candidate_v3_score/
+reports/results/od_1_10_check/
+reports/results/sparse_teacher_k/
 
 # ============================
 # Python

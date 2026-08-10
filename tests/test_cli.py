@@ -53,6 +53,12 @@ class FakePanoTracker:
                 'fov': (60.0, 40.0)}
 
 
+class FakeFullFrameTracker(FakePanoTracker):
+    """假 ERP 全帧 tracker，用于验证文件协议不会误走 PanoTracker。"""
+
+    input_space = 'erp_full'
+
+
 def _install_fake_pipeline():
     """向 sys.modules 注入假 pipeline 模块（延迟 import 会命中缓存）。"""
     mod = types.ModuleType('panotrack.pipeline.pipeline')
@@ -158,6 +164,42 @@ def test_cli_main():
     print('PASS test_cli_main')
 
 
+def test_full_frame_tracker_routing():
+    """erp_full tracker 由协议层直接创建，避免送入 BFoV PanoTracker。"""
+    from panotrack.trackers import factory
+    from panotrack.io.file_protocol import run_file_protocol
+
+    original_create = factory.create_tracker
+    original_space = factory.get_tracker_input_space
+    created = []
+
+    def fake_create(name, **kwargs):
+        tracker = FakeFullFrameTracker({'tracker': name, **kwargs})
+        created.append(tracker)
+        return tracker
+
+    factory.create_tracker = fake_create
+    factory.get_tracker_input_space = lambda name: (
+        'erp_full' if name == 'fake_full' else original_space(name))
+    try:
+        with tempfile.TemporaryDirectory() as td:
+            frames_dir, init_file = _make_seq(td, n=3)
+            out_file = os.path.join(td, 'results.txt')
+            cfg = {'tracker': 'fake_full', 'search_size': 224,
+                   'patch_size': 255, 'lost_score': 0.25}
+            stats = run_file_protocol(frames_dir, init_file, out_file, cfg)
+            assert stats['n_frames'] == 3
+            assert len(created) == 1
+            assert created[0].config == {'tracker': 'fake_full',
+                                          'search_size': 224}
+            with open(out_file, 'r', encoding='utf-8') as f:
+                assert len(f.read().splitlines()) == 3
+    finally:
+        factory.create_tracker = original_create
+        factory.get_tracker_input_space = original_space
+    print('PASS test_full_frame_tracker_routing')
+
+
 def test_trax_protocol():
     """trax 占位协议：握手/init/frame/quit 行协议往返正确。"""
     _install_fake_pipeline()
@@ -210,6 +252,7 @@ if __name__ == '__main__':
     test_help_runs()
     test_file_protocol()
     test_cli_main()
+    test_full_frame_tracker_routing()
     test_trax_protocol()
     test_crossing_bbox_output()
     print('\nALL TESTS PASSED')

@@ -21,8 +21,10 @@
 
 **关键发现**：BFoV 框架的恒定角速度状态预测会累积误差，到第 7-8 帧时完全漂移。
 Direct ERP 方案（绕过 BFoV）在精度和速度上均显著优于传统框架；
-进一步接入 LightFC 后，代表序列全帧平均 **AUC 0.618 / SR@0.5 0.749**（先进水平），
-CPU 实时约 10 FPS（纯模型推理 38 FPS，评测瓶颈在 4K JPEG 解码）。
+进一步接入 LightFC 后，3 个代表序列（0008/0036/0116，各 150 帧）全帧平均
+**AUC 0.618 / SR@0.5 0.749**（先进水平），CPU 实时约 10 FPS
+（纯模型推理 38 FPS，评测瓶颈在 4K JPEG 解码）。注意：LightFC 评测**仅覆盖
+上述代表序列**，全量 120 序列尚未用 LightFC 全量评测。
 
 ---
 
@@ -87,7 +89,8 @@ python demo/run_demo.py
 - **接口契约**：所有模块必须遵守 `CONTRACTS.md`，不要跨模块修改接口
 - **注释规范**：中文 docstring + 英文标识符
 - **提交前检查**：`python tests/test_*.py` 全绿，`runs/` 不提交
-- **大文件**：ONNX 模型、数据集不进 Git，单独共享
+- **大文件**：ONNX 模型、数据集不进 Git，单独共享；`models/` 已由 `.gitignore` 忽略、
+  当前未入库，ONNX 模型需自行准备或团队共享
 
 ---
 
@@ -295,6 +298,20 @@ python scripts/eval_360vot.py --seqs 001,003 --max-frames 100
 
 ## Docker 构建与运行
 
+### 三份离线交付镜像（2026-08-10）
+
+| 镜像 | 内容 | 定位 |
+| --- | --- | --- |
+| `grt360-final:2026-08-10` | panotrack + LightFC/VitTrack ONNX（CPU，约 675 MB） | 轻量离线协议验收 |
+| `grt360-uetrack:2026-08-09` | UETrack ERP-wrap GPU 镜像（约 16.8 GB） | 高速版提交（AUC 0.5143 / 57.16 FPS） |
+| `grt360-odtrack:2026-08-10` | ODTrack ERP 三平铺 GPU 镜像（约 13.4 GB） | **精度版提交（AUC 0.5792 / SR 0.6532 / 8.99 FPS）** |
+
+ODTrack 精度版镜像入口 `integrations/odtrack/file_protocol.py`（与 UETrack 镜像
+同一文件协议：`--frames` 帧目录 + `--init` 初始框 -> `--out` results.txt），
+构建脚本 `docker/odtrack/build_odtrack_image.sh`（从 `artifacts/server_snapshot/`
+组装构建上下文）。构建、验证与运行细节见 `docs/FINAL_DELIVERY_ZH.md` 与
+`docs/DOCKER_TEST_ZH.md`。
+
 镜像基于 `python:3.12-slim`，**断网自包含**：构建期一次性安装依赖并
 COPY 源码，运行期零网络访问。在仓库根目录执行：
 
@@ -384,10 +401,15 @@ LightFC 已作为**全帧跟踪器**接入（同 Direct ERP 思路，不走 BFoV
 
 ---
 
-## 直接 ERP 跟踪方案（Stage 3 主推方案）
+## 直接 ERP 跟踪方案（历史 / 本地验证方案）
 
-在 Stage 2 验证中发现，BFoV 框架的状态预测漂移是比小目标稀释更严重的瓶颈。
-因此 Stage 3 主推 **Direct ERP Tracker**：直接在全帧 ERP 上运行 VitTrack，绕过 BFoV 切图。
+在 Stage 2 验证中发现，BFoV 框架的状态预测漂移是比小目标稀释更严重的瓶颈，
+因此曾提出 **Direct ERP Tracker**：直接在全帧 ERP 上运行 VitTrack，绕过 BFoV 切图。
+
+> **当前状态**：此为历史 / 本地验证方案，Stage 3 主推方案已切换为 **LightFC**（见上方
+> 「LightFC 接入指南」）。`direct_erp` 与新 `vittrack_onnx` 已统一为 real onnxruntime
+> 推理（复用 VitTrackONNX，无 cv2 依赖）；旧 `cv2.TrackerVit` 仅作为本地验证 fallback，
+> 生产路径不依赖 cv2。
 
 ### 性能对比
 
@@ -535,4 +557,4 @@ A: 用 `tools_local/` 下的脚本（如 `debug_seq0036.py`）或在 `tests/` �
 
 ---
 
-> **最后更新**：2026-07-25 | **当前阶段**：Stage 3 官方数据对接中 | **推荐方案**：Direct ERP Tracker
+> **最后更新**：2026-07-25 | **当前阶段**：Stage 3 官方数据对接中 | **推荐方案**：LightFC

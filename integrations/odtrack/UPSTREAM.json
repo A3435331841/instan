@@ -1,0 +1,8 @@
+{
+  "name": "ODTrack",
+  "repository": "https://github.com/GXNU-ZhongLab/ODTrack",
+  "role": "GRT-360 精度冠军教师模型",
+  "adapter": "integrations/odtrack/run_erp.py",
+  "checkpoint_policy": "上游代码与权重不复制进本仓库；部署时通过 --odtrack-root 和 --checkpoint 显式提供并记录 SHA-256",
+  "evaluation": "ERP 三平铺，360VOT 严格 120 序列协议"
+}

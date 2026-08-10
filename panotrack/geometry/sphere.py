@@ -40,6 +40,70 @@ def lonlat_to_unit(lon, lat):
     return x, y, z
 
 
+def normalize(v):
+    """单位化向量（长度不足时保护，返回与输入同形）。
+
+    参数: v 形状 (..., 3) 数组。
+    返回: (..., 3) 单位向量。
+    """
+    v = np.asarray(v, dtype=np.float64)
+    n = np.maximum(np.linalg.norm(v, axis=-1, keepdims=True), 1e-12)
+    return v / n
+
+
+def rodrigues_rotate(v, axis, angle):
+    """Rodrigues 旋转：向量 v 绕单位轴 axis 旋转 angle 弧度（S² 状态用）。
+
+    参数: v 形状 (..., 3) 向量；axis 形状 (..., 3) 旋转轴（自动单位化）；
+          angle 标量或 (...,) 弧度（可广播）。
+    返回: (..., 3) 旋转后的向量（不主动归一，调用方自行决定）。
+    公式: v' = v*cosθ + (k×v)*sinθ + k*(k·v)*(1-cosθ)，k = normalize(axis)。
+    """
+    v = np.asarray(v, dtype=np.float64)
+    k = normalize(np.asarray(axis, dtype=np.float64))
+    a = np.asarray(angle, dtype=np.float64)
+    cos, sin = np.cos(a), np.sin(a)
+    kdot = np.sum(k * v, axis=-1, keepdims=True)
+    cross = np.cross(k, v)
+    return v * cos + cross * sin + k * kdot * (1.0 - cos)
+
+
+def rotate_with_rotvec(v, rotvec):
+    """按旋转向量 rotvec(=axis*angle) 旋转向量 v（S² 状态用）。
+
+    参数: v 形状 (3,) 向量；rotvec 形状 (3,) 旋转向量，模为该旋转角度（弧度）。
+    返回: (3,) 旋转后的向量。
+    说明: 等价于 rodrigues_rotate(v, normalize(rotvec), |rotvec|)。
+    """
+    m = float(np.linalg.norm(np.asarray(rotvec, dtype=np.float64)))
+    if m < 1e-12:
+        return np.array(v, dtype=np.float64)
+    return rodrigues_rotate(v, rotvec, m)
+
+
+def rotation_vec_between(p, q):
+    """从单位向量 p 到 q 的最短旋转向量（axis*angle，S² 状态观测速度用）。
+
+    参数: p, q 形状 (3,) 单位向量。
+    返回: (3,) 旋转向量 r = angle * axis，其中 axis = normalize(cross(p,q))，
+          angle = atan2(|p×q|, p·q) ∈ [0, π]。
+    """
+    p = normalize(np.asarray(p, dtype=np.float64))
+    q = normalize(np.asarray(q, dtype=np.float64))
+    c = np.cross(p, q)
+    s = float(np.linalg.norm(c))
+    d = float(np.dot(p, q))
+    angle = float(np.arctan2(s, d))
+    if s < 1e-12:  # 对跖点或同向：旋转轴退化，取与 p 正交的固定轴（防奇异）
+        axis = np.array([0.0, 1.0, 0.0])
+        if abs(float(np.dot(p, axis))) > 0.9:
+            axis = np.array([1.0, 0.0, 0.0])
+        axis = normalize(axis - float(np.dot(axis, p)) * p)
+    else:
+        axis = c / s
+    return axis * angle
+
+
 def unit_to_lonlat(x, y, z):
     """单位向量转经纬度（经度自动 wrap 到 (-180, 180]）。
 

@@ -42,14 +42,18 @@ class LightFCONNX(BaseTracker):
     update(image) -> {'bbox','score','psr','apce'}。
     """
 
+    input_space = 'erp_full'
+
     def __init__(self, backbone_path, tracking_path, search_size=256,
                  search_factor=4.0, template_size=128, template_factor=2.0,
-                 **kwargs):
+                 backend='cpu', max_crop_size=2048, **kwargs):
         """创建 LightFC ONNX 跟踪器。
 
         参数: backbone_path —— lightfc_backbone.onnx;tracking_path ——
               lightfc_tracking.onnx;search_size/search_factor —— 搜索区尺寸与
-              裁剪倍率;template_size/template_factor —— 模板尺寸与裁剪倍率。
+              裁剪倍率;template_size/template_factor —— 模板尺寸与裁剪倍率;
+              backend —— 'cpu' 或 'cuda'(onnxruntime provider);
+              max_crop_size —— 失锁时搜索裁剪的硬上限。
         返回: None
         """
         del kwargs
@@ -59,13 +63,26 @@ class LightFCONNX(BaseTracker):
         self.search_factor = float(search_factor)
         self.template_size = int(template_size)
         self.template_factor = float(template_factor)
+        self.max_crop_size = max(256, int(max_crop_size))
         self.feat_sz = self.search_size // 16
         self.output_window = _hann2d(np.array([self.feat_sz, self.feat_sz]),
                                      centered=True)
+        providers = (['CUDAExecutionProvider', 'CPUExecutionProvider']
+                     if str(backend).lower() == 'cuda'
+                     else ['CPUExecutionProvider'])
+        # A long 4K sequence can otherwise make ONNX Runtime's process-wide
+        # CPU arena retain tens of gigabytes of transient JPEG/crop buffers.
+        # Disable the arena and memory-pattern cache so a sequence process can
+        # release its peak allocation deterministically.
+        sess_options = ort.SessionOptions()
+        sess_options.enable_cpu_mem_arena = False
+        sess_options.enable_mem_pattern = False
         self._sess_b = ort.InferenceSession(self.backbone_path,
-                                            providers=['CPUExecutionProvider'])
+                                            sess_options=sess_options,
+                                            providers=providers)
         self._sess_t = ort.InferenceSession(self.tracking_path,
-                                            providers=['CPUExecutionProvider'])
+                                            sess_options=sess_options,
+                                            providers=providers)
         self.state = None
         self.z_feat = None
         self._last_score = 1.0
@@ -88,10 +105,17 @@ class LightFCONNX(BaseTracker):
         x, y, w, h = (float(v) for v in target_bb)
         crop_sz = int(np.ceil(np.sqrt(w * h) * factor))
         crop_sz = max(crop_sz, 2)
+        # A lost tracker can predict an unbounded box.  Capping the crop
+        # prevents a 4K ERP frame from allocating a huge square before the
+        # patch is resized to the network input size.
+        crop_sz = min(crop_sz, self.max_crop_size)
         cx, cy = x + 0.5 * w, y + 0.5 * h
         half = crop_sz // 2
-        cols = np.mod(np.arange(cx - half, cx - half + crop_sz), W).astype(np.int64)
-        rows = np.arange(cy - half, cy - half + crop_sz)
+        # 用整数起点构造 arange,避免浮点误差导致长度多1(cx/cy 为浮点时)
+        start_col = int(np.round(cx - half))
+        start_row = int(np.round(cy - half))
+        cols = np.mod(np.arange(start_col, start_col + crop_sz), W).astype(np.int64)
+        rows = np.arange(start_row, start_row + crop_sz)
         rows_c = np.clip(rows, 0, H - 1).astype(np.int64)
         out = np.zeros((crop_sz, crop_sz, 3), dtype=np.uint8)
         valid = (rows >= 0) & (rows < H)
