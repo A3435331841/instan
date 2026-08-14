@@ -52,9 +52,15 @@ docker save grt360-odtrack:2026-08-14-cu128 -o grt360-odtrack-cu128.tar   # 约 
 docker load -i grt360-odtrack-cu128.tar
 ```
 
-**方式 B：GPU 机器上重新构建**（需要先拷贝 ODTrack 上游源码+权重，见 §5 文件索引）
+**方式 B：GPU 机器上重新构建**（构建依赖包已打包，见下方获取方式）
 ```bash
-# 从本机 D:\instan\pano360\artifacts\server_snapshot\ 拷贝 upstream/odtrack 与 weights/ODTrack_ep0300.pth.tar
+# ① clone 代码（main 已含构建脚本/协议代码）
+git clone https://github.com/A3435331841/instan && cd instan
+# ② 获取构建依赖包 grt360-odtrack-build-deps.tar.gz（330MB：ODTrack 源码+权重）
+#    途径：GitHub Release（tag: grt360-odtrack-build-deps-v1，若已上传）
+#         或 网盘/QQ（找队友要，文件在无 GPU 那台 D:\grt360-odtrack-build-deps.tar.gz）
+tar -xzf grt360-odtrack-build-deps.tar.gz     # 解出 artifacts/server_snapshot/...
+# ③ 构建（需联网拉基础镜像+pip；评测断网但镜像自包含）
 bash docker/odtrack/build_odtrack_cu128.sh grt360-odtrack:2026-08-14-cu128
 ```
 
@@ -138,10 +144,13 @@ Blackwell: <通过/报错信息>
 | `integrations/odtrack/README_ARENA_PROTOCOL.md` | 协议入口使用说明 |
 | `deliverables/SUBMISSION_2026-08-10/05_官方联系/ARENA平台提交指南_2026-08-14.md` | 平台完整提交指南（配额/镜像规范/格式） |
 
-**不进入 Git 的大文件**（从本机 `D:\instan\pano360\` 拷贝）：
-- `artifacts/server_snapshot/upstream/odtrack/` —— ODTrack 上游源码（重构建用）
-- `artifacts/server_snapshot/weights/ODTrack_ep0300.pth.tar` —— 权重（371MB，SHA-256 见 §1）
-- 已构建镜像本身（方式 A 直接 docker save 传输，无需这些）
+**不进入 Git 的大文件**：
+- **构建依赖包** `grt360-odtrack-build-deps.tar.gz`（330MB，含 ODTrack 源码 + 权重）——
+  已打包在无 GPU 那台 `D:\grt360-odtrack-build-deps.tar.gz`；上传途径：GitHub Release
+  （tag `grt360-odtrack-build-deps-v1`，网页手动上传，GitHub 单文件上限 2GB）或网盘/QQ。
+  解压到仓库根（保留 `artifacts/server_snapshot/` 结构）即可直接构建。
+- **已构建镜像本身**（方式 A 直接 docker save 传输，约 4.4GB，无需源码/权重）。
+- 权重 SHA-256：`2fba6ddeb826014ac0bb871623406d16c3a162afbf09accb49312b526c21068e`（见 §1）
 
 ---
 
