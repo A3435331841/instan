@@ -1,0 +1,59 @@
+# GRT-360 ODTrack 精度版提交镜像（精简基础镜像版）
+#
+# 与原 Dockerfile 的区别仅在于基础镜像与 torch 安装方式：
+#   - 基础镜像：pytorch/pytorch:2.3.1-cuda12.1-cudnn8-runtime（~12GB，conda 环境）
+#     -> nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04（~2.5GB）
+#   - torch/torchvision：基础镜像自带 -> 显式 pip 安装 cu121 wheel
+#     （torch wheel 自带 CUDA/cuDNN 库，docker run --gpus all 兼容）
+# 代码、权重与 Arena 官方协议入口（arena_protocol.py）与 grt360-odtrack:2026-08-14-arena 完全一致，
+# 成绩可复现。构建需联网（拉基础镜像 + pip 下载）。
+#
+# 评测协议：docker run --rm --gpus all -v <测试集>:/mnt/dataset:ro -v <输出>:/mnt/result <镜像> （无参自启动）
+ARG BASE_IMAGE=nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="GRT-360 ODTrack ERP 精度版提交镜像 (minimal)"
+LABEL org.opencontainers.image.source="https://github.com/A3435331841/instan"
+LABEL grt360.method="ODTrack Base + ERP 三平铺适配"
+LABEL grt360.metrics="AUC=0.5792135073 SR=0.6531941586 FPS=8.9945 (120 sequences, 2x RTX 3090)"
+LABEL grt360.checkpoint.sha256="2fba6ddeb826014ac0bb871623406d16c3a162afbf09accb49312b526c21068e"
+LABEL grt360.upstream="https://github.com/GXNU-ZhongLab/ODTrack"
+LABEL grt360.minimal="true"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    PYTHONPATH=/opt/odtrack \
+    DATASET_DIR=/mnt/dataset \
+    RESULT_DIR=/mnt/result
+
+# ubuntu22.04 无 PEP 668 限制；build-essential 保证 pycocotools/jpeg4py 等
+# 无 manylinux wheel 时可现场编译，避免大体积下载后因缺编译器失败重试
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip git libglib2.0-0 libgl1 libjpeg-turbo8 build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip install --no-cache-dir --upgrade pip
+
+# 原 pytorch 基础镜像自带 torch 2.3.1+cu121；精简基础镜像需显式安装（cu121 wheel）。
+# 必须先装 torch：requirements.txt 里的 timm 依赖 torch>=1.7，若先装 requirements，
+# pip 会从 PyPI 拉 CPU 版最新 torch（浪费下载且留下脏层）；先装 cu121 版可满足该依赖。
+RUN python3 -m pip install --no-cache-dir \
+        torch==2.3.1+cu121 torchvision==0.18.1+cu121 \
+        --index-url https://download.pytorch.org/whl/cu121
+
+COPY requirements.txt /opt/grt360/requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /opt/grt360/requirements.txt
+
+# ODTrack 上游源码（lib/ 与 experiments/ 配置）与官方权重（构建脚本去重，
+# 快照 output/ 内不再保留副本，镜像中仅此一份）
+COPY odtrack_src/ /opt/odtrack/
+COPY ODTrack_ep0300.pth.tar /opt/models/ODTrack_ep0300.pth.tar
+COPY integrations/ /opt/grt360/integrations/
+COPY scripts/odtrack_360vot.py /opt/grt360/scripts/odtrack_360vot.py
+
+RUN python3 -c "import torch, torchvision, cv2, numpy, easydict, yacs, timm, einops, pandas, PIL, scipy; print('torch', torch.__version__, 'numpy', numpy.__version__)"
+
+WORKDIR /opt/odtrack
+ENTRYPOINT ["python3", "/opt/grt360/integrations/odtrack/arena_protocol.py"]

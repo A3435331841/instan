@@ -1,0 +1,50 @@
+# GRT-360 ODTrack 精度片提交镜像（CUDA 12.8 版，支持 RTX 5090 Blackwell）
+#
+# 评测环境（2026-08-14 官方回复）：驱动 580 / 最高 CUDA 12.8 / 5090dv2 x1 (24GB)
+# 官方推荐基础镜像：nvidia/cuda:12.8.2-base-ubuntu22.04 或 pytorch/pytorch:2.11.0-cuda12.8
+#
+# 关键：RTX 5090 是 Blackwell (sm_120) 架构，torch 必须是 cu128 版本且 >= 2.6（含 sm_120 kernel）。
+# 选 torch 2.7.0+cu128：Blackwell 支持成熟且 API 与 ODTrack 容易兼容。
+#
+# Arena 平台协议：无参自启动跑完全部序列，输出 BFoV 到 /mnt/result，退出码 0。
+ARG BASE_IMAGE=nvidia/cuda:12.8.2-base-ubuntu22.04
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="GRT-360 ODTrack 精度片提交镜像 (CUDA 12.8)"
+LABEL org.opencontainers.image.source="https://github.com/A3435331841/instan"
+LABEL grt360.method="ODTrack Base + ERP 三平铺适配 + BFoV 官方协议"
+LABEL grt360.metrics="AUC=0.5792135073 SR=0.6531941586 (120 sequences, 2x RTX 3090)"
+LABEL grt360.checkpoint.sha256="2fba6ddeb826014ac0bb871623406d16c3a162afbf09accb49312b526c21068e"
+LABEL grt360.cuda="12.8"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    PYTHONPATH=/opt/odtrack \
+    DATASET_DIR=/mnt/dataset \
+    RESULT_DIR=/mnt/result
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip git libglib2.0-0 libgl1 libjpeg-turbo8 build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip install --no-cache-dir --upgrade pip
+
+# 先装 cu128 torch（含 Blackwell sm_120 kernel），再装 requirements（避免 pip 拉 CPU 版 torch）
+RUN python3 -m pip install --no-cache-dir \
+        torch==2.7.0+cu128 torchvision==0.22.0+cu128 \
+        --index-url https://download.pytorch.org/whl/cu128
+
+COPY requirements.txt /opt/grt360/requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /opt/grt360/requirements.txt
+
+COPY odtrack_src/ /opt/odtrack/
+COPY ODTrack_ep0300.pth.tar /opt/models/ODTrack_ep0300.pth.tar
+COPY integrations/ /opt/grt360/integrations/
+COPY scripts/odtrack_360vot.py /opt/grt360/scripts/odtrack_360vot.py
+
+RUN python3 -c "import torch, torchvision, cv2, numpy, easydict, yacs, timm, einops, pandas, PIL, scipy; print('torch', torch.__version__, 'cuda', torch.version.cuda, 'numpy', numpy.__version__)"
+
+WORKDIR /opt/odtrack
+ENTRYPOINT ["python3", "/opt/grt360/integrations/odtrack/arena_protocol.py"]

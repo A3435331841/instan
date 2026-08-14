@@ -61,6 +61,19 @@ docker run --rm --network none grt360-final:2026-08-10 \
 镜像用于实际均衡路线推理，GPU ODTrack 镜像用于实际精度路线推理。
 三份镜像都不需要运行期联网。
 
+## Arena 平台官方协议适配（2026-08-14）
+
+平台 https://yjy-arena.insta360.cn/ 实测确认：提交方式为 docker push 到本队专属地址，接口为 BFoV（不是上传 tar，也不是 ERP xywh）。
+
+- 新入口：`integrations/odtrack/arena_protocol.py`（无参自启动；
+  读 `/mnt/dataset/<seq>/video.mp4` + `init.txt`（BFoV），写 `/mnt/result/<seq>.txt`（BFoV，行号=帧号，丢失帧 0,0,0,0）；
+  接口规范与官方 demo.zip 一致。
+- 镜像规范：linux/amd64、断网自包含、退出码 0、提交配额每日 3 / 累计 10。
+- 验证：`tests/test_arena_protocol.py` 协议层全部通过；
+  带实际 ODTrack 权重 CPU 冒烟通过（多序列、丢失帧、seqlist）。
+- 详见 `docs/ARENA_PROTOCOL_TEST_ZH.md`。
+
+
 ## ODTrack 精度版 GPU 镜像（2026-08-10 新增）
 
 精度提交版镜像，把上游源码与权重完整打进镜像，运行期零网络：

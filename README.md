@@ -1,8 +1,11 @@
 # panotrack —— 影石全景视频智能跟踪赛道 · 360° ERP 实时单目标跟踪原型
 
-> **项目状态**：初赛已提交（2026-08-10）。120 序列全量赛马完成，提交方案为
-> **ODTrack ERP 三平铺**（AUC 0.5792 / SR 0.6532，详见 `reports/STAGE_RESULTS_2026-08-09.md`）。
+> **项目状态**：以 Arena 平台实况为准（2026-08-14）——报名 8/15 截止、比赛 8/16~8/21，提交方式为 docker push 到本队专属地址，
+> 接口为 BFoV。官方协议入口 `integrations/odtrack/arena_protocol.py` 已完成并通过本地验证。
+> 本地 120 序列全量赛马已完成：提交方案 **ODTrack ERP 三平铺**
+> （AUC 0.5792 / SR 0.6532，详见 `reports/STAGE_RESULTS_2026-08-09.md`）。
 > LightFC 曾为推荐方案（代表序列 AUC 0.618），全量评测后仅 0.31，已降级为历史方案。
+> 详见 `docs/ARENA_PROTOCOL_TEST_ZH.md` 与 `deliverables/SUBMISSION_2026-08-10/05_官方联系/ARENA平台提交指南_2026-08-14.md`。
 
 武汉大学 4 人学生队参赛作品。面向 360° ERP（等距柱状投影）全景视频的实时单目标跟踪：
 **球面状态层预测 → tangent 局部切图 → 轻量跟踪器 → 置信度判丢 → 逐级扩大 FoV 重试 → 全局重检测**，
