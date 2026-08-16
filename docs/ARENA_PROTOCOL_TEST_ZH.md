@@ -111,6 +111,14 @@ docker push <推送地址>/<compUID>/<teamUID>/model:v1   # 推送成功即自�
 3. **像素口径损失来源：**roundtrip 让像素框微小偏移（尺寸误差约 6%），但平台不用此口径；官方明确用 360VOTS 无偏球面 IoU。
 4. **差异方向不稳定（±0.6pp 内）：**这量级差异在噪声范围内，不构成精度回退。
 
+### UETrack 高速版适配（2026-08-14）
+
+- 新入口：`integrations/uetrack/arena_protocol.py`（与 ODTrack 版同协议：BFoV 输入输出 / 无参自启动 / 退出码 0）
+- 镜像：`docker/uetrack/Dockerfile.cu128` + `build_uetrack_cu128.sh`（CUDA 12.8 + torch 2.7.0+cu128，支持 5090 Blackwell）
+- 速度：UETrack ERP-wrap 全量 120 序列 57.16 FPS（AUC 0.5143）——本地最快版本
+- 风险：UETrack 依赖 CLIP（git 安装旧版），需验证 torch 2.7 兼容性；构建中
+
+
 ## 四、镜像审查与重构（2026-08-14）
 
 ### 发现的问题（重要）

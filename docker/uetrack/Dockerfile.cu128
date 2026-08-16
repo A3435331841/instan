@@ -1,0 +1,52 @@
+# GRT-360 UETrack 高速片提交镜像（CUDA 12.8 版，支持 RTX 5090 Blackwell）
+#
+# 评测环境（2026-08-14 官方）：驱动 580 / 最高 CUDA 12.8 / 5090dv2 x1 (24GB)
+# 基础镜像用 CUDA 12.8 及以下：torch 必须 cu128 版本且 >= 2.6（含 sm_120 kernel）
+#
+# Arena 平台协议：无参自启动跑完全部序列，输出 BFoV 到 /mnt/result，退出码 0。
+ARG BASE_IMAGE=nvidia/cuda:12.8.2-base-ubuntu22.04
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="GRT-360 seam-aware UETrack (CUDA 12.8)"
+LABEL org.opencontainers.image.source="https://github.com/A3435331841/instan"
+LABEL grt360.uetrack.commit="fd13b0eaf16d51536008295f3b27807c69eaad50"
+LABEL grt360.checkpoint.sha256="1d34778a41c553e3a5e17829d33df4a644f7c948b054a64f46e02fa99558b901"
+LABEL grt360.cuda="12.8"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    PYTHONPATH=/opt/uetrack \
+    DATASET_DIR=/mnt/dataset \
+    RESULT_DIR=/mnt/result
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip git libglib2.0-0 libgl1 libjpeg-turbo8 build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip install --no-cache-dir --upgrade pip
+
+# 先装 cu128 torch（含 Blackwell sm_120 kernel）
+RUN python3 -m pip install --no-cache-dir \
+        torch==2.7.0+cu128 torchvision==0.22.0+cu128 \
+        --index-url https://download.pytorch.org/whl/cu128
+
+COPY docker/uetrack/requirements.txt /opt/grt360/requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /opt/grt360/requirements.txt
+
+# 上游源码 / 权重 / CLIP 缓存（构建脚本组装上下文）
+COPY tools_local/uetrack_docker/external/UETrack/ /opt/uetrack/
+COPY tools_local/uetrack_docker/models/uetrack_base.tar /opt/models/uetrack_base.tar
+COPY tools_local/uetrack_docker/clip_cache/ViT-L-14.pt /root/.cache/clip/ViT-L-14.pt
+COPY integrations/uetrack/ /opt/grt360/integrations/uetrack/
+
+RUN python3 /opt/grt360/integrations/uetrack/install_adapter.py \
+        --workspace /opt/uetrack \
+        --output-root /opt/uetrack_output \
+        --checkpoint /opt/models/uetrack_base.tar \
+    && python3 -c "import clip, cv2, timm, torch; print('torch', torch.__version__, 'cuda', torch.version.cuda)"
+
+WORKDIR /opt/uetrack
+# Arena 平台官方协议入口：无参自启动，BFoV 输出
+ENTRYPOINT ["python3", "/opt/grt360/integrations/uetrack/arena_protocol.py"]
