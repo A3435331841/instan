@@ -7,7 +7,7 @@ models/
 # ============================
 # 数据集（太大，单独分发）
 # ============================
-data360/
+data360/*
 !data360/README_HF.md
 !data360/official_split/
 !data360/360vots-info.csv

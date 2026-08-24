@@ -1,0 +1,534 @@
+{
+  "seed": 20260824,
+  "source": "D:\\instan\\初赛数据\\ys_panotracking_train.zip",
+  "n_train": 95,
+  "n_valid": 35,
+  "per_block": {
+    "train_real": 47,
+    "train_sim": 83
+  },
+  "train": [
+    {
+      "block": "train_real",
+      "seq": "seq_0001"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0005"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0006"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0008"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0009"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0010"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0011"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0013"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0015"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0016"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0017"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0018"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0019"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0020"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0022"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0023"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0024"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0025"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0027"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0032"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0033"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0034"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0035"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0036"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0038"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0039"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0040"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0041"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0042"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0044"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0045"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0046"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0001"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0002"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0003"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0004"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0005"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0006"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0007"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0008"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0009"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0010"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0012"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0013"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0014"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0015"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0016"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0017"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0018"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0019"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0020"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0021"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0022"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0023"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0025"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0027"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0028"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0030"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0032"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0033"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0034"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0036"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0037"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0038"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0039"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0040"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0042"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0043"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0044"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0045"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0046"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0048"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0049"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0051"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0052"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0053"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0054"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0055"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0057"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0059"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0061"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0062"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0063"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0064"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0067"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0068"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0069"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0070"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0073"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0074"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0075"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0077"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0078"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0080"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0083"
+    }
+  ],
+  "valid": [
+    {
+      "block": "train_real",
+      "seq": "seq_0002"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0003"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0004"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0007"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0012"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0014"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0021"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0026"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0028"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0029"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0030"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0031"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0037"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0043"
+    },
+    {
+      "block": "train_real",
+      "seq": "seq_0047"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0011"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0024"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0026"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0029"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0031"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0035"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0041"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0047"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0050"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0056"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0058"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0060"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0065"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0066"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0071"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0072"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0076"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0079"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0081"
+    },
+    {
+      "block": "train_sim",
+      "seq": "seq_0082"
+    }
+  ]
+}
