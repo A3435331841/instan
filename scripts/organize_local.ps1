@@ -11,6 +11,8 @@ $Repo = Join-Path $Root 'pano360'
 $Stamp = '20260827'
 $LogDir = Join-Path $Storage 'manifests'
 $LogPath = Join-Path $LogDir "LOCAL_REORGANIZATION_LOG_$Stamp.csv"
+$MapPath = Join-Path $LogDir "LOCAL_PATH_MAP_$Stamp.csv"
+$InventoryPath = Join-Path $LogDir "LOCAL_SOURCE_INVENTORY_$Stamp.csv"
 
 function Assert-SafePath([string]$Path) {
     $full = [IO.Path]::GetFullPath($Path).TrimEnd('\')
@@ -24,20 +26,37 @@ function Assert-SafePath([string]$Path) {
 function Add-Action([string]$Source, [string]$Destination, [string]$Kind, [bool]$Junction) {
     $sourceFull = Assert-SafePath $Source
     $destinationFull = Assert-SafePath $Destination
+    $destinationOccupied = $false
+    if (Test-Path -LiteralPath $destinationFull) {
+        $destinationItem = Get-Item -LiteralPath $destinationFull
+        $destinationOccupied = (-not $destinationItem.PSIsContainer) -or
+            ($null -ne (Get-ChildItem -LiteralPath $destinationFull -Force | Select-Object -First 1))
+    }
     $script:Actions += [pscustomobject]@{
         source = $sourceFull; destination = $destinationFull; kind = $Kind
         junction = $Junction; source_exists = (Test-Path -LiteralPath $sourceFull)
-        destination_exists = (Test-Path -LiteralPath $destinationFull)
+        destination_exists = $destinationOccupied
     }
+}
+
+function Move-EmptySkeleton([string]$Destination) {
+    if (-not (Test-Path -LiteralPath $Destination)) { return }
+    $item = Get-Item -LiteralPath $Destination
+    if (-not $item.PSIsContainer) { throw "Destination is a file: $Destination" }
+    if ($null -ne (Get-ChildItem -LiteralPath $Destination -Force | Select-Object -First 1)) {
+        throw "Destination is non-empty: $Destination"
+    }
+    $backup = "$Destination.preexisting_empty_$Stamp"
+    if (Test-Path -LiteralPath $backup) { throw "Skeleton backup already exists: $backup" }
+    Move-Item -LiteralPath $Destination -Destination $backup
+    Add-Content -LiteralPath $LogPath -Value ('"{0}","{1}","skeleton","move"' -f $Destination,$backup)
 }
 
 function Move-WithJunction([string]$Source, [string]$Destination, [string]$Kind) {
     $sourceFull = Assert-SafePath $Source
     $destinationFull = Assert-SafePath $Destination
     if (-not (Test-Path -LiteralPath $sourceFull)) { return }
-    if (Test-Path -LiteralPath $destinationFull) {
-        throw "Destination already exists; refusing to merge automatically: $destinationFull"
-    }
+    if (Test-Path -LiteralPath $destinationFull) { Move-EmptySkeleton $destinationFull }
     $parent = Split-Path -Parent $destinationFull
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     Move-Item -LiteralPath $sourceFull -Destination $destinationFull
@@ -49,9 +68,7 @@ function Move-Only([string]$Source, [string]$Destination, [string]$Kind) {
     $sourceFull = Assert-SafePath $Source
     $destinationFull = Assert-SafePath $Destination
     if (-not (Test-Path -LiteralPath $sourceFull)) { return }
-    if (Test-Path -LiteralPath $destinationFull) {
-        throw "Destination already exists; refusing to merge automatically: $destinationFull"
-    }
+    if (Test-Path -LiteralPath $destinationFull) { Move-EmptySkeleton $destinationFull }
     $parent = Split-Path -Parent $destinationFull
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
     Move-Item -LiteralPath $sourceFull -Destination $destinationFull
@@ -91,6 +108,22 @@ New-Item -ItemType Directory -Force -Path $LogDir | Out-Null
 if (-not (Test-Path -LiteralPath $LogPath)) {
     Set-Content -LiteralPath $LogPath -Value 'source,destination,kind,operation'
 }
+# Snapshot the planned map and source directory statistics before any move.
+# These are audit artifacts; they intentionally contain no file contents or
+# credentials and make the operation reversible through the log/Junctions.
+$Actions | Export-Csv -LiteralPath $MapPath -NoTypeInformation -Encoding UTF8
+$inventory = foreach ($action in $Actions) {
+    if (-not (Test-Path -LiteralPath $action.source)) { continue }
+    $files = @(Get-ChildItem -LiteralPath $action.source -Recurse -File -Force -ErrorAction SilentlyContinue)
+    [pscustomobject]@{
+        source = $action.source
+        destination = $action.destination
+        kind = $action.kind
+        files = $files.Count
+        bytes = (($files | Measure-Object -Property Length -Sum).Sum -as [long])
+    }
+}
+$inventory | Export-Csv -LiteralPath $InventoryPath -NoTypeInformation -Encoding UTF8
 
 # Never move a path with unresolved conflicts.  The only deletion-like action
 # in this script is creating an empty replacement directory for .codex_tmp.
@@ -118,4 +151,4 @@ foreach ($name in @('0001','0002','0003','0004','0005','zips','.cache')) {
     Move-WithJunction (Join-Path $Repo "data360\$name") (Join-Path $Storage "datasets\360vot_legacy\$name") 'data360_payload'
 }
 
-Write-Output "Local organization complete. Log: $LogPath"
+Write-Output "Local organization complete. Log: $LogPath; map: $MapPath; inventory: $InventoryPath"
