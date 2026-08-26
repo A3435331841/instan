@@ -23,6 +23,7 @@ import paramiko
 
 CHUNK = 1 * 1024 * 1024
 REOPEN_BYTES = 256 * 1024 * 1024
+EXEC_BLOCK_BYTES = 64 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -59,6 +60,29 @@ class RemoteSession:
             self.sftp.close()
         if self.client is not None:
             self.client.close()
+
+    def read_block(self, path: str, offset: int, size: int) -> bytes:
+        """Read one bounded binary block through an SSH exec channel."""
+        unit = 1024 * 1024
+        if offset % unit or size <= 0:
+            raise ValueError("exec block must be aligned to 1 MiB")
+        count = (size + unit - 1) // unit
+        command = ("dd if='{}' bs=1048576 skip={} count={} iflag=fullblock status=none 2>/dev/null"
+                   .format(path.replace("'", "'\\''"), offset // unit, count))
+        _, stdout, stderr = self.client.exec_command(command, timeout=90)
+        stdout.channel.settimeout(60.0)
+        data = bytearray()
+        while len(data) < size:
+            chunk = stdout.read(min(CHUNK, size - len(data)))
+            if not chunk:
+                break
+            data.extend(chunk)
+        error = stderr.read().decode("utf-8", "replace").strip()
+        if error:
+            raise RuntimeError(f"remote block read failed for {path}: {error}")
+        if len(data) != size:
+            raise RuntimeError(f"remote block short read for {path}: {len(data)}/{size}")
+        return bytes(data)
 
 
 def default_specs(root: Path) -> list[Spec]:
@@ -107,10 +131,10 @@ def local_hash(path: Path) -> str:
 def remote_hash(client, path: str) -> str:
     command = "sha256sum -- " + "'" + path.replace("'", "'\\''") + "'"
     _, stdout, stderr = client.exec_command(command, timeout=300)
+    value = stdout.read().decode("utf-8", "replace").split()
     error = stderr.read().decode("utf-8", "replace").strip()
     if error:
         raise RuntimeError(f"remote hash failed for {path}: {error}")
-    value = stdout.read().decode("utf-8", "replace").split()
     if not value:
         raise RuntimeError(f"remote hash returned no value for {path}")
     return value[0]
@@ -168,6 +192,11 @@ def sync_file(session: RemoteSession, remote_file: str, local_file: Path,
 
     partial = local_file.with_name(local_file.name + ".partial")
     offset = partial.stat().st_size if partial.is_file() else 0
+    aligned = (offset // EXEC_BLOCK_BYTES) * EXEC_BLOCK_BYTES
+    if offset != aligned:
+        with partial.open("r+b") as handle:
+            handle.truncate(aligned)
+        offset = aligned
     if offset > expected_size:
         partial.unlink()
         offset = 0
@@ -181,17 +210,16 @@ def sync_file(session: RemoteSession, remote_file: str, local_file: Path,
             attempts = 0
             while offset < block_end:
                 try:
-                    with session.sftp.open(remote_file, "rb") as source:
-                        source.settimeout(30.0)
-                        source.seek(offset)
-                        while offset < block_end:
-                            data = source.read(min(CHUNK, block_end - offset))
-                            if not data:
-                                raise RuntimeError(
-                                    f"remote file ended early: {remote_file} at {offset}/{expected_size}")
-                            target.write(data)
-                            offset += len(data)
-                            target.flush()
+                    size = min(EXEC_BLOCK_BYTES, block_end - offset)
+                    # The final block may be shorter than 1 MiB; pad the read
+                    # request and discard the extra bytes after receipt.
+                    request_size = ((size + 1024 * 1024 - 1) // (1024 * 1024)) * (1024 * 1024)
+                    if offset + request_size > expected_size:
+                        request_size = expected_size - offset
+                    data = session.read_block(remote_file, offset, request_size)
+                    target.write(data[:size])
+                    offset += size
+                    target.flush()
                     attempts = 0
                 except (OSError, EOFError, RuntimeError, socket.timeout):
                     attempts += 1
