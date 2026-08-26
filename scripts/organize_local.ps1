@@ -92,6 +92,20 @@ function Move-Only([string]$Source, [string]$Destination, [string]$Kind) {
     Add-Content -LiteralPath $LogPath -Value ('"{0}","{1}","{2}","move"' -f $sourceFull,$destinationFull,$Kind)
 }
 
+function Ensure-Junction([string]$Source, [string]$Destination, [string]$Kind) {
+    $sourceFull = Assert-SafePath $Source
+    $destinationFull = Assert-SafePath $Destination
+    if (Test-Path -LiteralPath $sourceFull) {
+        $item = Get-Item -LiteralPath $sourceFull -Force
+        if ($item.LinkType -eq 'Junction' -and
+            ([IO.Path]::GetFullPath([string]$item.Target).TrimEnd('\') -ieq $destinationFull)) { return }
+        throw "Cannot create compatibility Junction over existing path: $sourceFull"
+    }
+    if (-not (Test-Path -LiteralPath $destinationFull)) { return }
+    New-Item -ItemType Junction -Path $sourceFull -Target $destinationFull | Out-Null
+    Add-Content -LiteralPath $LogPath -Value ('"{0}","{1}","{2}","junction"' -f $sourceFull,$destinationFull,$Kind)
+}
+
 $script:Actions = @()
 
 # Root-level items: preserve old paths for data and legacy deliverables.
@@ -187,7 +201,8 @@ foreach ($name in @('airsim_index.html','modlens_test.png','cockpit-provider-mod
 Move-Only (Join-Path $Root 'archive_listing.txt') (Join-Path $Storage 'manifests\archive_listing_20260827.txt') 'audit_snapshot'
 Move-Only (Join-Path $Root '.qa_grt360_appendix_20260809') (Join-Path $Root 'grt360_deliverables\legacy_20260809') 'qa_archive'
 Move-WithJunction (Join-Path $Root 'tools_local') (Join-Path $Storage 'experiments\local_legacy_202608\tools_local') 'root_tools'
-Move-Only (Join-Path $Repo 'docker\sutrack\build_ctx') (Join-Path $Storage 'docker_images\sutrack_build_ctx') 'docker_build_context'
+Move-WithJunction (Join-Path $Repo 'docker\sutrack\build_ctx') (Join-Path $Storage 'docker_images\sutrack_build_ctx') 'docker_build_context'
+Ensure-Junction (Join-Path $Repo 'docker\sutrack\build_ctx') (Join-Path $Storage 'docker_images\sutrack_build_ctx') 'docker_build_context'
 Move-Only (Join-Path $Repo 'scripts\profile_sutrack.py') (Join-Path $Storage 'experiments\local_legacy_202608\profile_sutrack.py') 'profile_snapshot'
 
 Move-WithJunction (Join-Path $Repo 'artifacts') (Join-Path $Storage 'experiments\legacy_artifacts') 'repo_artifacts'
