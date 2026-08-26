@@ -12,6 +12,7 @@ nearing expiry.
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import hashlib
 import json
@@ -50,6 +51,30 @@ def digest(path: Path) -> str:
     return h.hexdigest()
 
 
+def sanitize_component(component: str) -> str:
+    """Map POSIX control characters to a Windows-safe archive name."""
+    cleaned = []
+    for char in component:
+        code = ord(char)
+        if code < 32 or char in '<>:"|?*':
+            cleaned.append(f"_U{code:02X}_")
+        else:
+            cleaned.append(char)
+    value = "".join(cleaned).rstrip(" .")
+    return value or "_empty_"
+
+
+def safe_relative_name(name: str) -> str:
+    parts = []
+    for part in name.replace("\\", "/").split("/"):
+        if part in ("", "."):
+            continue
+        if part == "..":
+            raise RuntimeError(f"unsafe tar member: {name}")
+        parts.append(sanitize_component(part))
+    return "/".join(parts)
+
+
 def remote_hashes(client: paramiko.SSHClient, remote_root: str, top_level: bool = False) -> dict[str, str]:
     qroot = shlex.quote(remote_root)
     depth = "-maxdepth 1 " if top_level else ""
@@ -60,7 +85,10 @@ def remote_hashes(client: paramiko.SSHClient, remote_root: str, top_level: bool 
     if error:
         raise RuntimeError(f"remote file hash index failed: {error}")
     result: dict[str, str] = {}
-    for line in text.splitlines():
+    # ``splitlines`` would treat a literal CR in a historical filename as a
+    # record separator.  The remote command is newline-delimited, so split on
+    # LF only and preserve any CR belonging to the path.
+    for line in text.split("\n"):
         if len(line) >= 66 and len(line[:64]) == 64:
             result[line[66:]] = line[:64].lower()
     return result
@@ -74,10 +102,17 @@ def safe_extract(archive: Path, destination: Path) -> int:
             name = member.name.replace("\\", "/")
             if name.startswith("/") or name == ".." or name.startswith("../") or "/../" in name:
                 raise RuntimeError(f"unsafe tar member: {member.name}")
-            target = (destination / name).resolve()
+            safe_name = safe_relative_name(name)
+            target = (destination / safe_name).resolve()
             if destination.resolve() not in target.parents and target != destination.resolve():
                 raise RuntimeError(f"tar member escapes destination: {member.name}")
-            stream.extract(member, destination)
+            # A few historical scheduler artifacts have a trailing CR in the
+            # filename.  NTFS cannot represent that name; retain the bytes
+            # under an explicit, reversible ``_U0D_`` component instead of
+            # dropping the file.
+            extracted_member = copy.copy(member)
+            extracted_member.name = safe_name
+            stream.extract(extracted_member, destination)
             count += 1
     return count
 
@@ -88,7 +123,7 @@ def verify_tree(root: Path, remote_root: str, hashes: dict[str, str]) -> tuple[i
     for remote_file, expected in hashes.items():
         if not remote_file.startswith(prefix):
             continue
-        relative = Path(*remote_file[len(prefix):].split("/"))
+        relative = Path(*safe_relative_name(remote_file[len(prefix):]).split("/"))
         local = root / relative
         checked += 1
         if not local.is_file() or local.stat().st_size == 0 and expected != digest(local):
@@ -137,7 +172,7 @@ def archive_one(client: paramiko.SSHClient, remote_root: str, local_root: Path,
         prefix = remote_root.rstrip("/") + "/"
         if not remote_file.startswith(prefix):
             continue
-        relative = Path(*remote_file[len(prefix):].split("/"))
+        relative = Path(*safe_relative_name(remote_file[len(prefix):]).split("/"))
         local = local_root / relative
         checked += 1
         if not local.is_file() or digest(local) != expected:
