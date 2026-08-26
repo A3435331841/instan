@@ -267,9 +267,10 @@ def sync_file(session: RemoteSession, remote_file: str, local_file: Path,
     return record
 
 
-def write_manifest(output: Path, records: list[dict], started: str):
+def write_manifest(output: Path, records: list[dict], started: str,
+                   manifest_name: str = "transfer_manifest.json"):
     output.mkdir(parents=True, exist_ok=True)
-    json_path = output / "transfer_manifest.json"
+    json_path = output / manifest_name
     json_path.write_text(json.dumps({
         "started": started,
         "finished": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -290,6 +291,8 @@ def main(argv=None):
     parser.add_argument("--only", action="append", default=[], help="remote prefix to sync; repeatable")
     parser.add_argument("--top-level", action="append", default=[],
                         help="sync regular files directly below a remote directory")
+    parser.add_argument("--manifest-name", default="transfer_manifest.json",
+                        help="per-channel manifest filename")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
@@ -320,7 +323,7 @@ def main(argv=None):
                       else f"  {record['status']}: {relative} ({size} bytes)", flush=True)
     finally:
         session.close()
-    json_path, csv_path = write_manifest(root, records, started)
+    json_path, csv_path = write_manifest(root, records, started, args.manifest_name)
     print(f"manifest={json_path}")
     print(f"sha256_csv={csv_path}")
     print(f"files={len(records)}")
