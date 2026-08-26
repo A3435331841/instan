@@ -164,6 +164,14 @@ def iter_files(sftp, root: str):
                 stack.append(path)
 
 
+def iter_top_files(sftp, root: str):
+    """Yield regular files directly below root without descending into data."""
+    for child in sftp.listdir_attr(root):
+        mode = child.st_mode
+        if mode & 0o170000 == 0o100000:
+            yield posixpath.join(root, child.filename), int(child.st_size), float(child.st_mtime)
+
+
 def safe_relative(remote_root: str, remote_file: str) -> str:
     root = remote_root.rstrip("/")
     if remote_file == root:
@@ -261,18 +269,23 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", default=r"D:\instan\grt360_storage\experiments\server_exit_20260827")
     parser.add_argument("--only", action="append", default=[], help="remote prefix to sync; repeatable")
+    parser.add_argument("--top-level", action="append", default=[],
+                        help="sync regular files directly below a remote directory")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
     specs = default_specs(root)
     if args.only:
         specs = [spec for spec in specs if any(spec.remote.startswith(prefix) for prefix in args.only)]
+    for remote_root in args.top_level:
+        specs.append(Spec(remote_root, "server_control/top_level", "control"))
     started = time.strftime("%Y-%m-%dT%H:%M:%S%z")
     records = []
     session = RemoteSession()
     try:
         for spec in specs:
-            remote_files = list(iter_files(session.sftp, spec.remote))
+            remote_files = (list(iter_top_files(session.sftp, spec.remote))
+                            if spec.kind == "control" else list(iter_files(session.sftp, spec.remote)))
             print(f"[{spec.kind}] {spec.remote}: {len(remote_files)} files")
             for remote_file, size, mtime in remote_files:
                 relative = safe_relative(spec.remote, remote_file)
