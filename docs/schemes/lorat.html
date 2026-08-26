@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LoRAT（B378/L378，LoRA 高效跟踪） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="active" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge blue">真实场景专家（保留）</span>
+    <span class="badge">通用 SOT · LoRA 微调</span>
+    <span class="badge blue">⏱ 决赛冲刺（2026-08-21 ~）</span>
+  </div>
+  <h1>LoRAT（B378/L378，LoRA 高效跟踪）</h1>
+  <div class="summary">LoRAT（ECCV 2024，LoRA 参数高效微调跟踪器，码基最现代）接入。representative 上精度最强（AUC 0.6021 / SR 0.7275），但 medium 速度慢（8.7 FPS）且泛化衰减，定位为真实场景精度专家而非主干。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">rep AUC</div><div class="m-value">0.6021</div><div class="m-scope">representative 9（全场最高）</div></div>
+<div class="metric"><div class="m-name">rep SR</div><div class="m-value">0.7275</div><div class="m-scope">representative 9</div></div>
+<div class="metric"><div class="m-name">medium AUC</div><div class="m-value">0.4725</div><div class="m-scope">medium 30</div></div>
+<div class="metric"><div class="m-name">FPS</div><div class="m-value">8.7</div><div class="m-scope">medium 并发</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">LoRAT（DINOv2 骨干 + LoRA 适配，B-378/L-378 变体），接入方式与 ODTrack 类似三平铺 ERP 适配；外部仓库 `external/LoRAT`（源码+权重 base.bin 校验入库）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**LoRAT（ECCV 2024，『Tracking Meets LoRA』）**：核心贡献是把**低秩适配（Low-Rank Adaptation, LoRA）**引入视觉跟踪——冻结大规模预训练 backbone（DINOv2），只训练注入的 LoRA 低秩矩阵（W&#x27; = W + ΔW = W + BA，B∈R^{d×r}, A∈R^{r×d}，r 为秩），用极少量可训练参数（&lt;1%）达到全量微调性能。DINOv2 的强语义特征使模型在真实场景（光照变化、形变、相似物干扰）下鲁棒。**变体**：B-224/B-378/L-378（base/large × 输入分辨率 224/378），B378 在 4090 上 285 FPS。**接入**：外部仓库 `external/LoRAT`（trackit 框架，纯 PyTorch 2.x 无 mmcv，升 torch 2.7+cu128 工程量最小），权重 base.bin 已校验入库；pano360 的 eval_official.py 通过 `build_lorat_tracker()` + `attach_lora_state_dict_hooks_()` 加载 LoRA 权重（graphify 图谱证实该耦合是实际依赖面）。**medium 实证**：representative AUC 0.6021 全场最高（real 0.6873 / sim 0.4315），但 medium 30 仅 0.4725、8.7 FPS——大输入（378）+ 慢骨干使其泛化与速度双双衰减。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么 representative 精度全场第一（0.6021）**（结构归因）：DINOv2 是自监督预训练的视觉基础模型，其特征对光照、形变、相似物干扰具有极强的语义鲁棒性——real 域（真实光照/运动/遮挡）正是 DINOv2 特征的舒适区。LoRA 只训练低秩增量（ΔW=BA），冻结 backbone 主体，保留了 DINOv2 的完整通用表征能力（不会像全量微调那样破坏预训练特征），这是 real AUC 0.6873 遥遥领先的结构性原因。**为什么 medium 泛化衰减（0.6021→0.4725）**：①**输入分辨率 378**——搜索图更大、目标占比更高，但对 4K 全景小目标仍不够，且推理成本高（8.7 FPS）；②**变体与数据**：B/L-378 在官方分布（1440×720）下的目标尺寸与 378 输入匹配度不如 224 变体；③representative 9 条精选序列放大了其真实场景优势，medium 30 的 sim/hard 序列（seq_0044 0.083、seq_0052 0.050）拉平了均值。**为什么速度慢**：DINOv2 大骨干 + 378 输入 = 每帧计算量数倍于 224 轻量模型；B378 的 285 FPS 是 4090 纯推理口径，端到端（解码+预处理）仍被整体链路拖累。**定位机理**：它是『真实场景高精度专家』而非『全量主干』——融合中只在 real 域/低置信帧调用可扬长避短。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>representative 精度全场第一（0.6021）</li>
+<li>real 域专家：real AUC 0.4656 &gt; sim 0.4815，真实场景 win 5 seq</li>
+<li>LoRA 参数高效，码基纯 PyTorch 2.x 无 mmcv，升 cu128 工程量最小</li>
+<li>B378 在 4090 上 285 FPS（若换装可解决速度问题）</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>medium 速度 8.7 FPS 太慢，泛化衰减（0.60→0.47）</li>
+<li>graphify 图谱显示其与 pano360 评测脚本深度耦合（实际依赖面）</li>
+<li>大分辨率输入（378）推理成本高</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">真实场景/高精度专家：仅在低置信帧或 real 域调用慢专家；分析其成功序列特征作为『何时重定位』启发。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>external/LoRAT/</div>
+<div class="file-item"><span class="tag">📄</span>scripts/eval_official.py（LoRAT 后端）</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>保留为真实场景专家参考；不作为主干；若融合只在少数低置信帧调用可严控调用率使用。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

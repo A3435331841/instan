@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LightFC ONNX（轻量全帧跟踪器） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="active" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge amber">已降级（历史推荐→全量翻车）</span>
+    <span class="badge">全帧跟踪 · 轻量 ONNX</span>
+    <span class="badge blue">⏱ Stage 2-3（2026-07-25 ~ 08-09）</span>
+  </div>
+  <h1>LightFC ONNX（轻量全帧跟踪器）</h1>
+  <div class="summary">LightFC（特征关联轻量跟踪器）经 ONNX 双子图接入全帧路线。代表序列 AUC 0.618 一度为推荐方案，120 序列全量评测仅 0.3116——小样本数字的典型教训。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">AUC</div><div class="m-value">0.618</div><div class="m-scope">3 代表序列全帧 mean（150帧）</div></div>
+<div class="metric"><div class="m-name">AUC</div><div class="m-value">0.3116</div><div class="m-scope">360VOT 120 序列全量</div></div>
+<div class="metric"><div class="m-name">FPS</div><div class="m-value">~10 CPU / 38 纯推理</div><div class="m-scope">4K JPEG 解码为瓶颈</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">LightFC 双子图 ONNX（backbone 2.2MB + tracking 12.7MB），ERP 全帧输入，搜索区水平回绕，对齐 BaseTracker 契约。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**LightFC（轻量特征关联跟踪器）**：以轻量卷积 backbone（MobileNet 类）提取特征，用逐层关联（correlation）取代 transformer 的全局注意力，在保持特征交互能力的同时大幅压缩计算量。**ONNX 双子图拆分**：①backbone 子图（2.2MB）——对模板/搜索帧提取特征；②tracking 子图（12.7MB）——特征关联 + 头回归。拆分使模板特征可复用（首帧提取一次）。**接入方式**：对齐 BaseTracker 契约（init/update），输入 ERP 全帧，搜索区裁剪水平回绕处理 360° 跨界；全帧跟踪器在 eval_360vot.py 走 _eval_full_frame 直连路径（不经 BFoV 切图与全局重检测）。**性能**：纯模型推理 38 FPS，端到端 CPU ~10 FPS——4K JPEG 解码是主要瓶颈。**配置**：search_size=256, search_factor=4.0, template_size=128, template_factor=2.0, hp_sigma=0.0（Raw 输入，复用 Direct ERP 的 highpass 损害结论）。**历史教训**：3 代表序列全帧 AUC 0.618/SR 0.749（先进水平）→ 120 序列全量仅 0.3116，小样本数字严重高估。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么代表序列强（AUC 0.618）**：LightFC 的逐层特征关联（correlation）在目标外观稳定、尺寸适中的序列上表现优异——轻量 backbone 已能提取足够判别特征，且 3 条代表序列（0008/0036/0116）恰好是这种『温和』场景，150 帧短序列内目标外观变化有限。**为什么全量崩盘（0.3116）**（结构性归因）：①**无时序记忆**——LightFC 是单帧匹配器（每帧独立关联），不做跨帧状态累积，长时序列（2400 帧）中外观漂移后无法自校正；②**无判丢/重捕获**——一旦关联错误（相似物、遮挡）就永久跟错，与 ODTrack 的 dense temporal memory 形成鲜明对比；③**轻量骨干的容量上限**——MobileNet 类特征在困难外观（强形变/相似物）下判别力不足。**为什么 CPU 实时**：双子图 ONNX + 关联计算的算力需求远低于 transformer 全局注意力，backbone 2.2MB 的特征提取开销极小。**教训的机理**：代表序列 0.618 是全量 0.3116 的 2 倍——小样本的『场景选择性』放大了方案在温和场景的真实能力，这正是项目确立『全量评测纪律』的技术根因。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>模型极小（~15MB），CPU 实时（~10 FPS）</li>
+<li>代表序列表现先进（AUC 0.618 / SR 0.749）</li>
+<li>轻量线生产仅依赖 numpy/Pillow/scipy + onnxruntime，无 torch/cv2</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>120 序列全量只有 0.3116，小样本数字严重高估</li>
+<li>对困难序列（长时/遮挡/小目标）泛化差</li>
+<li>双子图 ONNX 导出与版本管理成本</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">轻量/低算力场景或融合中的 Scout 分支；不作为精度主干。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>panotrack/trackers/lightfc_onnx.py</div>
+<div class="file-item"><span class="tag">📄</span>configs/lightfc.json</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>降级为历史方案。全量评测纪律自此确立：任何候选必须 120 序列全量验证。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

@@ -1,0 +1,49 @@
+# GRT-360 SUTrack-B224 提交镜像（CUDA 12.8，支持 RTX 5090 Blackwell）
+#
+# 基于 SUTrack-B224（Fast-iTPN backbone, search=224, template=112）
+# 当前最强单模型：AUC 0.6113 / SR 0.7223 / FPS 28.9（all130）
+#
+# 评测环境：RTX 5090 (Blackwell sm_120) + CUDA 12.8 + torch 2.7
+ARG BASE_IMAGE=nvidia/cuda:12.8.2-base-ubuntu22.04
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="GRT-360 SUTrack-B224 提交镜像 (CUDA 12.8)"
+LABEL grt360.method="SUTrack-B224 + Fast-iTPN + ERP 三平铺 + FP16 AMP"
+LABEL grt360.metrics="AUC=0.6113 SR=0.7223 FPS=28.9 (130 sequences, RTX 3090)"
+LABEL grt360.cuda="12.8"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    DATASET_DIR=/mnt/dataset \
+    RESULT_DIR=/mnt/result
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        python3 python3-pip git libglib2.0-0 libgl1 libjpeg-turbo8 build-essential \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip install --no-cache-dir --upgrade pip
+
+# CUDA 12.8 torch（含 Blackwell sm_120 kernel）
+RUN python3 -m pip install --no-cache-dir \
+        torch==2.7.0+cu128 torchvision==0.22.0+cu128 \
+        --index-url https://download.pytorch.org/whl/cu128
+
+# SUTrack 依赖
+RUN python3 -m pip install --no-cache-dir \
+        timm einops yacs easydict scipy pandas Pillow opencv-python-headless
+
+# 复制 SUTrack 源码和权重
+COPY sutrack_src/ /opt/sutrack/
+COPY SUTRACK_b224_ep0180.pth.tar /opt/models/SUTRACK_b224_ep0180.pth.tar
+
+# 复制协议入口
+COPY integrations/sutrack/arena_protocol_sutrack.py /opt/grt360/arena_protocol_sutrack.py
+
+# 验证
+RUN python3 -c "import torch, torchvision, cv2, numpy, timm, einops; \
+    print('torch', torch.__version__, 'cuda', torch.version.cuda)"
+
+WORKDIR /opt/sutrack
+ENTRYPOINT ["python3", "/opt/grt360/arena_protocol_sutrack.py"]

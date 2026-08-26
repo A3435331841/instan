@@ -1,0 +1,579 @@
+{
+  "project": "GRT-360 全景跟踪",
+  "generated": "2026-08-26",
+  "note": "本文件是技术方案 HTML 页面的唯一数据源。指标口径：360VOT 120 序列 / 官方 130 序列 / medium 30 / representative 9，均标注来源。",
+  "schemes": [
+    {
+      "id": "ncc_bfov",
+      "name": "NCC 基线（BFoV 框架）",
+      "category": "经典方法 · 几何框架",
+      "status": "已废弃（历史基线）",
+      "period": "Stage 1-2（2026-07）",
+      "summary": "项目最早的端到端原型：BFoV（球面视锥）几何 + 归一化互相关（NCC）局部跟踪器，合成数据上跑通，真实数据全面失败。",
+      "metrics": [
+        {"name": "AUC", "value": "0.11", "scope": "360VOT 6 序列 mean"},
+        {"name": "AUC_dual", "value": "0.12", "scope": "360VOT 6 序列 mean"},
+        {"name": "SR", "value": "0.10", "scope": "360VOT 6 序列 mean"},
+        {"name": "FPS", "value": "~5-10", "scope": "4K 本地 CPU"}
+      ],
+      "architecture": "BFoV 几何（球面→切平面投影）+ 恒定角速度状态预测 + NCC 局部匹配 + 判丢/重检测骨架。先验驱动，无学习型组件。",
+      "tech_details": "**几何管线**：BFoV 定义为中心 (lon,lat) + 视锥 (fov_h, fov_v)。ERP→BFoV 用 gnomonic 投影（切线平面）：对切平面角偏移 (du,dv)，方向向量 v = c + tan(du)·east + tan(dv)·north，其中 c/east/north 由中心方向与北向叉积构造的右手系（极区退化时 east 取固定方向）。反投影 erp_bbox_from_bfov 由视锥四角方向向量经 _unit_to_lonlat 得到 (lon,lat) 后映射到像素 x=(lon+180)/360·W, y=(90-lat)/180·H。**状态预测**：恒定角速度模型（球面圆周运动假设），对 lon 线性外推，lat 保持——该假设在真实 4K 序列第 7-8 帧即失效（漂移根因）。**NCC 匹配**：模板与搜索图灰度化 + highpass(σ) 预处理后逐像素归一化互相关，峰值 (py,px) 用 _subpixel_peak 亚像素精化；搜索图在 BFoV 窗口内以 sr_ratio 决定 FoV。**判丢**：PSR（峰值旁瓣比）与 APCE 双阈值（lost_psr=3.0, lost_apce=0.5）。超参：patch_size=255, sr_ratio=3.0~6.0, template_size=127, search_scale=2.0, lr=0.02, hp_sigma=3.0。",
+      "pros": [
+        "零依赖纯 numpy/Pillow/scipy，CPU 可跑",
+        "球面几何模块（BFoV/切平面投影）成为后续全部方案的几何底座",
+        "合成数据（equator/crossing/pole/occlusion）验证了跨界与极区处理的正确性"
+      ],
+      "why_works": "**为什么在合成/简单场景有效**：NCC 是无参的像素级模板匹配，其成功条件恰好是合成数据的特性——目标外观帧间几乎不变、光照恒定、无遮挡、目标在搜索图中占比足够大（>10%）。此时归一化互相关在数学上就是最优匹配（白噪声假设下的 ML 估计），且球面几何（gnomonic 投影）保证了切图无畸变，匹配精度可达亚像素（_subpixel_peak 精化）。**为什么在真实 4K 全景失效**（结构层面三重因果）：①NCC 的模板是首帧原始像素，真实目标外观变化（形变/光照/视角）使相关性迅速衰减；②4K 全景小目标（<30px）在切图中占比 <5%，搜索窗内峰值被背景噪声淹没；③恒定角速度状态预测是开环外推，第 7-8 帧起预测中心偏离目标，而 NCC 只在预测中心邻域搜索——定位误差与匹配误差正反馈放大。**结论**：NCC+BFoV 的失败是『无学习能力 + 开环状态预测』两个结构性缺陷叠加，而非参数问题（参数搜索已证明天花板）。",
+      "cons": [
+        "NCC 无学习能力，真实 4K 目标（<30px）占比 <5% 时完全失效",
+        "BFoV 恒定角速度状态预测第 7-8 帧累积漂移",
+        "6 序列 mean AUC 仅 0.11，远低于 Stage 2 目标 0.45"
+      ],
+      "scenarios": "仅适合合成数据/低难度验证；真实全景跟踪不可用。但球面几何与判丢骨架被 ODTrack 三平铺与 recapture 外挂继承。",
+      "files": ["panotrack/geometry/bfov.py", "panotrack/trackers/ncc.py", "panotrack/pipeline/state.py"],
+      "decision": "废弃为主跟踪器，几何模块保留复用。教训：小样本数字不可信，坚持全量评测。",
+      "graph_node": "pano360_panotrack_geometry_bfov"
+    },
+    {
+      "id": "bfov_vittrack",
+      "name": "BFoV + VitTrack（框架漂移验证）",
+      "category": "经典方法 · 几何框架 + 学习跟踪器",
+      "status": "已废弃（关键反面教材）",
+      "period": "Stage 2（2026-07-25 前后）",
+      "summary": "在 BFoV 框架上接入学习型跟踪器 VitTrack（ONNX），验证了『几何框架 + 学习跟踪器』策略对单序列有效（0036: 0.05→0.74），但整体被框架漂移拖垮。",
+      "metrics": [
+        {"name": "AUC", "value": "0.25", "scope": "360VOT 6 序列 mean"},
+        {"name": "AUC_dual", "value": "0.26", "scope": "360VOT 6 序列 mean"},
+        {"name": "SR", "value": "0.13", "scope": "360VOT 6 序列 mean"},
+        {"name": "FPS", "value": "~8", "scope": "4K 本地 CPU"}
+      ],
+      "architecture": "BFoV 切图（patch 255, sr_ratio 4-6）+ VitTrack 孪生网络（ONNX）+ 状态预测 + 判丢。搜索区裁剪自 360° 全景，FoV ~20°。",
+      "tech_details": "**VitTrack（AAAI 2023）**：孪生视觉 Transformer 跟踪器，单目帧间匹配（无需模板更新网络）。ONNX 化后双输入：模板图（127×127）与搜索图（patch_size² 按 sr_ratio 缩放），transformer encoder 融合两分支 token，decoder 直接回归目标框。**BFoV 切图**：以状态预测中心为 BFoV 中心，将 ERP 全景经 gnomonic 投影裁出 patch_size² 局部透视图——目标占切图比例由 sr_ratio 控制（sr_ratio=4 → FoV≈40°，小目标占比 <5%）。**状态预测**：恒定角速度外推 BFoV 中心。**参数搜索**（8 组网格，downscale=0.5, max_frames=50）：patch=255/sr=6.0 最优（AUC 0.241 vs 基线 0.239，仅 +0.8%）；patch=321/sr=4.0 大幅恶化（0.170，-28.9%）。**关键 bug 修复记录**：自适应 patch_size 在 update() 中未生效（改用 getattr(self,'_adaptive_patch_size',...)）；init/update 坐标转换使用不同 patch_size 导致 ERP 坐标错误。超参：template_size=127, lost_score=0.25, lost_psr=3.0, lost_apce=0.5, redetect_interval=3。",
+      "pros": [
+        "验证了框架+学习型跟踪器的方向（0036 序列 AUC 0.05→0.74，10 倍增益）",
+        "参数搜索结论（patch 255 / sr 6.0 最优）为后续提供参考",
+        "暴露了 BFoV 框架的根本缺陷，促成 Direct ERP 方案"
+      ],
+      "why_works": "**为什么单序列（0036）增益 10 倍**：VitTrack 的孪生 transformer 将 NCC 的『像素级模板匹配』升级为『语义级特征匹配』——目标即使发生轻微外观变化，其深度特征仍与模板特征高度相关，这是 0036 序列（目标外观变化、NCC 崩溃）上 0.05→0.74 的结构性原因。**为什么整体仍失败**：增益被 BFoV 框架的两个结构缺陷抵消——①开环状态预测漂移（同 NCC 方案），漂移后切图里根本没有目标，再强的跟踪器也无用；②小目标稀释：255×255 切图（FoV~20°）中 <30px 目标占比 <5%，VitTrack 的搜索区域被背景主导。**参数搜索为何封顶**：patch/sr/lost 只能改变搜索范围与判丢灵敏度，无法修复『预测漂移』与『目标稀释』——这正是网格搜索 8 组仅 +0.8% 的原因。**关键对照实验**（结构归因的铁证）：直接 cv2.TrackerVit 全帧 0.44 > BFoV+VitTrack 0.10——同一跟踪器，去掉框架后精度反超 4 倍，证明瓶颈 100% 在框架不在跟踪器。",
+      "cons": [
+        "BFoV 恒定角速度状态预测累积误差，frame 7-8 即严重漂移",
+        "小目标（<30px）在 255×255 切图中占比 <5%，孪生网络缺上下文",
+        "整体 mean AUC 0.25 仍远低于 0.45 目标",
+        "参数调优天花板明显：8 组网格搜索最优仅 +0.8%"
+      ],
+      "scenarios": "仅验证用。直接跟踪（无框架）AUC 0.44 > BFoV 框架 0.10，证明框架本身是负资产。",
+      "files": ["panotrack/trackers/vittrack_onnx.py", "configs/stage2_optimal.json"],
+      "decision": "废弃 BFoV 框架；结论『直接跟踪 > 框架跟踪』直接导向 Direct ERP 与全帧跟踪路线。",
+      "graph_node": "pano360_panotrack_trackers_vittrack_onnx"
+    },
+    {
+      "id": "direct_erp_vittrack",
+      "name": "Direct ERP + VitTrack（全帧直连）",
+      "category": "全帧跟踪 · 历史方案",
+      "status": "历史/本地验证方案",
+      "period": "Stage 2-3（2026-07-25 ~ 08）",
+      "summary": "绕过 BFoV 切图，直接在全帧 ERP 上跑 VitTrack。精度与 BFoV 持平但速度提升 20 倍、彻底消除漂移——是『全帧直连』路线的首个证据。",
+      "metrics": [
+        {"name": "AUC", "value": "0.26", "scope": "360VOT 6 序列 mean (100帧)"},
+        {"name": "AUC_dual", "value": "0.26", "scope": "同上"},
+        {"name": "FPS", "value": "155.6", "scope": "4K downscale 0.5"},
+        {"name": "对比", "value": "BFoV+VitTrack 0.25 / 8 FPS", "scope": "同口径"}
+      ],
+      "architecture": "ERP 全帧直喂 VitTrack（onnxruntime 双子图或 cv2），仅处理 360° 边界 x 回绕。无状态预测、无切图、无坐标转换。",
+      "tech_details": "**输入表示**：全帧 ERP (H,W,3) 直接送入 VitTrack，无 BFoV 切图。目标在 ERP 坐标 (x,y,w,h) 下直接跟踪，搜索区域即整幅全景（VitTrack 内部以模板为中心的注意力天然覆盖全帧）。**边界回绕**：update() 中预测框 x<0 时 +=W，x≥W 时 -=W，最终 x 钳制到 [0,W-w)——处理 360° 经度环绕。**推理后端**：onnxruntime 双子图（backbone 提取模板/搜索特征 → tracking head 回归），无 cv2 依赖；旧 cv2.TrackerVit 仅作本地验证 fallback。**预处理消融**（关键实证）：Raw ERP 帧最优（AUC 0.263, FPS 159）；highpass σ=3 降至 0.082（移除低频上下文信息，严重损害）；σ=5 为 0.094。**多尺度消融**：单尺度最优（0.263, 172 FPS）；0.5x 金字塔略降（0.261, 93 FPS）——VitTrack 内置 sr_ratio 已处理多尺度搜索，外部金字塔无益。**配置**：tracker=direct_erp, model_path=object_tracking_vittrack_2023sep.onnx。",
+      "pros": [
+        "消除框架漂移（无状态预测累积误差）",
+        "速度 20 倍于 BFoV（155 vs 8 FPS）",
+        "实现简单：仅 x 坐标模 W 回绕",
+        "Raw ERP 帧最优（highpass 损害 AUC 0.26→0.08；多尺度金字塔无益）"
+      ],
+      "why_works": "**为什么消除漂移**（结构对比）：BFoV 方案是『预测中心 → 切图 → 局部匹配』的开环链路，预测误差沿时间累积；Direct ERP 是『全帧输入 → 全局匹配』的闭环——VitTrack 的注意力天然覆盖整幅全景，目标出现在任何经度都能被搜索到，不存在『预测中心偏离』这一失效模式。**为什么 Raw ERP 优于 highpass**（预处理归因）：highpass 滤除低频分量，而 ERP 全景的低频信息（大面积天空/地面/场景布局）恰是目标定位的全局上下文；VitTrack 的 patch embedding 需要完整频谱建模目标与环境的关系，滤波后特征判别力骤降（AUC 0.26→0.08）。**为什么多尺度金字塔无益**：VitTrack 内部 sr_ratio 机制已在特征空间内做多尺度搜索，外部像素级金字塔是冗余且引入额外插值噪声。**为什么速度快 20 倍**：省去切图投影、状态预测、坐标转换三处每帧计算 + 省去小图重采样，只做一次全帧前向与一次 x 回绕。**局限的机理**：精度仅 0.26 是因为 VitTrack 本身能力上限（无时序记忆、无重捕获），Direct ERP 只是『最大化单帧匹配』，无法积累时序信息——这解释了为何它被有 dense temporal memory 的 ODTrack 超越（0.26→0.58）。",
+      "cons": [
+        "全帧 4K 输入内存/带宽开销大（被 ODTrack 三平铺的降采样解决）",
+        "精度仍只有 0.26 量级（VitTrack 自身能力上限）",
+        "生产路径需要 ONNX 双模型（backbone + tracking）"
+      ],
+      "scenarios": "验证了全帧直连的可行性；速度-精度权衡的基准。后被 ODTrack 三平铺超越（0.26→0.58）。",
+      "files": ["panotrack/trackers/direct_erp.py", "configs/direct_erp_vit.json"],
+      "decision": "作为历史方案保留；其『消除漂移 + 全帧上下文』思想被 ODTrack 三平铺继承。",
+      "graph_node": "pano360_panotrack_trackers_direct_erp"
+    },
+    {
+      "id": "lightfc",
+      "name": "LightFC ONNX（轻量全帧跟踪器）",
+      "category": "全帧跟踪 · 轻量 ONNX",
+      "status": "已降级（历史推荐→全量翻车）",
+      "period": "Stage 2-3（2026-07-25 ~ 08-09）",
+      "summary": "LightFC（特征关联轻量跟踪器）经 ONNX 双子图接入全帧路线。代表序列 AUC 0.618 一度为推荐方案，120 序列全量评测仅 0.3116——小样本数字的典型教训。",
+      "metrics": [
+        {"name": "AUC", "value": "0.618", "scope": "3 代表序列全帧 mean（150帧）"},
+        {"name": "AUC", "value": "0.3116", "scope": "360VOT 120 序列全量"},
+        {"name": "FPS", "value": "~10 CPU / 38 纯推理", "scope": "4K JPEG 解码为瓶颈"}
+      ],
+      "architecture": "LightFC 双子图 ONNX（backbone 2.2MB + tracking 12.7MB），ERP 全帧输入，搜索区水平回绕，对齐 BaseTracker 契约。",
+      "tech_details": "**LightFC（轻量特征关联跟踪器）**：以轻量卷积 backbone（MobileNet 类）提取特征，用逐层关联（correlation）取代 transformer 的全局注意力，在保持特征交互能力的同时大幅压缩计算量。**ONNX 双子图拆分**：①backbone 子图（2.2MB）——对模板/搜索帧提取特征；②tracking 子图（12.7MB）——特征关联 + 头回归。拆分使模板特征可复用（首帧提取一次）。**接入方式**：对齐 BaseTracker 契约（init/update），输入 ERP 全帧，搜索区裁剪水平回绕处理 360° 跨界；全帧跟踪器在 eval_360vot.py 走 _eval_full_frame 直连路径（不经 BFoV 切图与全局重检测）。**性能**：纯模型推理 38 FPS，端到端 CPU ~10 FPS——4K JPEG 解码是主要瓶颈。**配置**：search_size=256, search_factor=4.0, template_size=128, template_factor=2.0, hp_sigma=0.0（Raw 输入，复用 Direct ERP 的 highpass 损害结论）。**历史教训**：3 代表序列全帧 AUC 0.618/SR 0.749（先进水平）→ 120 序列全量仅 0.3116，小样本数字严重高估。",
+      "pros": [
+        "模型极小（~15MB），CPU 实时（~10 FPS）",
+        "代表序列表现先进（AUC 0.618 / SR 0.749）",
+        "轻量线生产仅依赖 numpy/Pillow/scipy + onnxruntime，无 torch/cv2"
+      ],
+      "why_works": "**为什么代表序列强（AUC 0.618）**：LightFC 的逐层特征关联（correlation）在目标外观稳定、尺寸适中的序列上表现优异——轻量 backbone 已能提取足够判别特征，且 3 条代表序列（0008/0036/0116）恰好是这种『温和』场景，150 帧短序列内目标外观变化有限。**为什么全量崩盘（0.3116）**（结构性归因）：①**无时序记忆**——LightFC 是单帧匹配器（每帧独立关联），不做跨帧状态累积，长时序列（2400 帧）中外观漂移后无法自校正；②**无判丢/重捕获**——一旦关联错误（相似物、遮挡）就永久跟错，与 ODTrack 的 dense temporal memory 形成鲜明对比；③**轻量骨干的容量上限**——MobileNet 类特征在困难外观（强形变/相似物）下判别力不足。**为什么 CPU 实时**：双子图 ONNX + 关联计算的算力需求远低于 transformer 全局注意力，backbone 2.2MB 的特征提取开销极小。**教训的机理**：代表序列 0.618 是全量 0.3116 的 2 倍——小样本的『场景选择性』放大了方案在温和场景的真实能力，这正是项目确立『全量评测纪律』的技术根因。",
+      "cons": [
+        "120 序列全量只有 0.3116，小样本数字严重高估",
+        "对困难序列（长时/遮挡/小目标）泛化差",
+        "双子图 ONNX 导出与版本管理成本"
+      ],
+      "scenarios": "轻量/低算力场景或融合中的 Scout 分支；不作为精度主干。",
+      "files": ["panotrack/trackers/lightfc_onnx.py", "configs/lightfc.json"],
+      "decision": "降级为历史方案。全量评测纪律自此确立：任何候选必须 120 序列全量验证。",
+      "graph_node": "pano360_panotrack_trackers_lightfc_onnx"
+    },
+    {
+      "id": "odtrack_erp3",
+      "name": "ODTrack ERP 三平铺（初赛提交 · 精度冠军）",
+      "category": "全景适配 · 三平铺",
+      "status": "已提交（初赛成绩冻结）",
+      "period": "Stage 3（2026-08-09 ~ 08-14）",
+      "summary": "把 ODTrack（自回归密集时序跟踪器）适配到 ERP 全景：目标区域三平铺展开送入模型，成为 120 序列赛马冠军并作为初赛提交镜像。公开文献事实 SOTA（超 AiATrack-360 0.534 约 +8.4%）。",
+      "metrics": [
+        {"name": "AUC", "value": "0.5792", "scope": "360VOT 120 序列全量"},
+        {"name": "SR", "value": "0.6532", "scope": "360VOT 120 序列全量"},
+        {"name": "FPS", "value": "8.99", "scope": "4K 端到端（3090）"},
+        {"name": "AUC", "value": "0.5882", "scope": "官方 130 序列基线（1440×720, 29.9 FPS）"}
+      ],
+      "architecture": "BFoV init → ERP 目标区域三平铺（中央 + 左右环绕）→ ODTrack 逐帧推理（dense temporal token 记忆）→ BFoV 输出。适配层 `integrations/odtrack/`，上游代码零改动。",
+      "tech_details": "**ODTrack（AAAI 2024）**：自回归（autoregressive）单目标跟踪器。核心创新是把跟踪建模为**多目标联合生成任务**——离线训练时随机从序列中采样 N 个目标帧（含模板帧）组成 batch 并行预测，使模型学会『用前序目标状态预测下一帧』的自回归模式；在线推理时持续用预测结果扩充 token 序列。backbone 为 ViT-B/16（384 输入），dense temporal token 记忆（MEMORY_THRESHOLD=1000）跨帧累积外观。**ERP 三平铺适配（本项目核心工程）**：`np.concatenate((frame, frame, frame), axis=1)` 将 ERP 帧水平复制 3 份（3W 宽）；首帧框 `_tile_box(box, width) = [x % W + W, y, w, h]` 移到**中间副本**——保证目标无论跨不跨经度边界，中央副本内都是无接缝的完整目标；逐帧推理后预测框 `pred[0] %= W` 折回原始宽度。**适配收益**：三平铺把『跨界目标在搜索图内分裂』问题转化为『平移不变』问题，模型无需感知 ERP 接缝。**评测**：OPE 协议，首帧 GT 初始化，`ope_evaluate`（21 点 AUC + dual IoU 双口径）。**配置**：TEMPLATE_FACTOR/SIZE、SEARCH_FACTOR/SIZE 来自 baseline.yaml。上游 py3.8 时代代码经 `_install_compat` 打补丁（torch._six/visdom 桩）。",
+      "pros": [
+        "120 序列赛马冠军（0.5792 > UETrack 0.5143 > LightFC 0.3116）",
+        "官方 130 序列基线 AUC 0.5882 / 29.9 FPS，验证方案稳健",
+        "三平铺适配收益 > backbone 差距：LoRAT 接入 360 微调后仍只有 0.495",
+        "Docker 断网自包含交付（cu128 镜像，5090 Blackwell 兼容）"
+      ],
+      "why_works": "**为什么三平铺是 ERP 全景的正确适配**（结构因果）：ERP 的经度接缝（x=0/W 处）会把跨界目标切成两半，任何局部搜索图都会看到『半目标』。三平铺把帧复制 3 份、目标框移到中间副本后，无论目标真实经度在哪，中间副本内的目标都是完整无接缝的——把『接缝问题』转化为『平移问题』，模型完全无需感知 ERP 边界。配合预测框 x%W 折回，输入输出都是标准单目跟踪语义。**为什么 dense temporal memory 是关键精度来源**：ODTrack 的自回归训练使其学会用前序目标状态（含 dense token 序列，MEMORY_THRESHOLD=1000）预测下一帧——长时序列中外观渐变时，记忆持续提供『目标长什么样』的锚定，这是 LightFC（单帧匹配）0.31 与 ODTrack 0.58 差距 27 个点的结构性原因。**为什么官方 130 基线更高（0.5882 vs 0.5792）**：官方数据 1440×720 分辨率低于 360VOT 测试的 4K，目标占比更大、解码更快（29.9 vs 8.99 FPS），且与隐藏测试集同分布——同一方案在目标更清晰时精度自然提升。**局限机理**：失锁后 dense memory 吸收错误外观形成正反馈（污染），无判丢机制导致一路错到底——这是 recapture/自适应状态机的设计动机。",
+      "cons": [
+        "端到端仅 8.99 FPS（瓶颈在 4K 解码 + 整图拷贝 + CPU 裁剪，非模型）",
+        "无判丢/重捕获：失锁后时序记忆被污染一路错到底（10 条失锁序列）",
+        "dense temporal token 长时漂移正反馈",
+        "三平铺输入形态与官方隐藏测试分布有 gap（已被官方 130 序列验证覆盖）"
+      ],
+      "scenarios": "精度优先的提交方案；全帧域（360° 全景单目标跟踪）主干。适合作为融合中的精度教师与失锁研究的基座。",
+      "files": ["integrations/odtrack/arena_protocol.py", "integrations/odtrack/run_erp.py", "configs/grt360_best_accuracy.json"],
+      "decision": "初赛提交冻结（AUC 0.5792）。决赛与 Phase 2 均以其为精度锚点，微调/融合/自适应全部围绕它展开。",
+      "graph_node": "pano360_integrations_odtrack_run_erp"
+    },
+    {
+      "id": "uetrack_erpwrap",
+      "name": "UETrack ERP-wrap（高速基线）",
+      "category": "全景适配 · ERP 环绕",
+      "status": "保留（高速基线/蒸馏起点）",
+      "period": "Stage 3（2026-08-09 ~）",
+      "summary": "UETrack（统一高效跟踪器）以 ERP-wrap 形式接入（搜索图环绕 padding），120 序列 AUC 0.5143 / 57.16 FPS，速度是 ODTrack 的 6 倍多，是快路径与知识蒸馏学生模型的起点。",
+      "metrics": [
+        {"name": "AUC", "value": "0.5143", "scope": "360VOT 120 序列全量"},
+        {"name": "SR", "value": "0.5776", "scope": "360VOT 120 序列全量"},
+        {"name": "FPS", "value": "57.16", "scope": "端到端"},
+        {"name": "FPS", "value": "38.5", "scope": "medium 30 并发观测"}
+      ],
+      "architecture": "UETrack（parameter=uetrack_base, search 224, template 112, moe_experts=8, moe_layer=[5]）+ ERP 环绕 padding（搜索图拼接跨越经度边界）。",
+      "tech_details": "**UETrack（统一高效跟踪器，2024）**：轻量 transformer 跟踪器，训练时统一 SOT/MOT/DET 多任务数据，推理时单分支输出。**ERP-wrap 适配（本项目）**：`erp_wrap.py` 提供两个替换函数——`sample_target_erp`（水平循环采样：搜索图跨经度边界时用 `np.roll`/循环拼接补齐，而非截断）与 `clip_box_erp`（预测框经度环绕折回 [0,W)）。通过 monkey-patch 替换 `lib.test.tracker.uetrack.sample_target/clip_box` 实现，上游代码零改动。**MoE 配置**：moe_experts=8、moe_layer=[5]，在 transformer 第 5 层引入 8 个专家（mixture-of-experts 稀疏激活），兼顾容量与效率。**模板/搜索尺寸**：template 112×112（template_factor=2.0）、search 224×224（search_factor=4.0），window=True（hann 窗抑制边缘响应）。**评测路径**：run_erp.py 走 UETrack 官方 run_sequence，GRT360_DATA_ROOT/SEQUENCES 环境变量驱动；结果行数与帧数严格校验（不完整即 RuntimeError）。",
+      "pros": [
+        "57 FPS 端到端，速度档最强",
+        "精度 0.51 量级可作为融合快路径主干",
+        "代表序列与 medium 均表现稳定（uetrack rep AUC 0.5229 / 51.6 FPS）",
+        "MoE 结构（8 experts）与 Phase 2 专家路由思想同源"
+      ],
+      "why_works": "**为什么快（57 FPS）**：UETrack 是轻量 transformer（搜索图仅 224×224 vs ODTrack 的 384 三平铺级输入），加上 MoE 稀疏激活（moe_experts=8, moe_layer=[5]）——每帧只激活少数专家路径，计算量按容量缩放；统一 SOT/MOT/DET 预训练让单分支结构足够紧凑。**为什么 ERP-wrap 不牺牲精度**：`sample_target_erp` 的循环拼接让搜索图跨接缝时内容连续（而非截断丢一半目标），`clip_box_erp` 保证预测框语义正确折回——这与三平铺解决同一问题（接缝），但用『采样时环绕』而非『输入时平铺』，省去 3 倍输入拷贝（也是速度优势的一部分）。**为什么 real 域略强于 sim（0.4627 vs 0.4254）**：统一多任务训练（含真实 MOT/DET 数据）使模型在真实场景统计下更稳健；sim 域（仿真目标、极端运动）超出其训练分布。**为什么精度低于 ODTrack 约 7 点**：①无 dense temporal memory（轻量结构无跨帧 token 累积）；②224 搜索图对 4K 小目标的分辨率不如三平铺 384 输入；③MoE 稀疏化在困难外观上判别力弱于密集 transformer。**定位**：速度-精度 Pareto 前沿的另一端，与 ODTrack 互补而非替代。",
+      "cons": [
+        "精度低于 ODTrack 0.58 约 6-7 个点，不足以单独提交",
+        "real 域 AUC 0.4627 高于 sim 0.4254——真实场景泛化尚可但上限有限",
+        "ERP-wrap 仅在搜索图环绕，未处理极区畸变"
+      ],
+      "scenarios": "高速实时/低算力场景；融合中的快路径主干；知识蒸馏学生模型起点（grt360_balanced 配置的『学生』）。",
+      "files": ["integrations/uetrack/arena_protocol.py", "integrations/uetrack/run_erp.py", "configs/grt360_fast_uetrack.json"],
+      "decision": "保留为高速基线；与 ODTrack 组成『精度-速度』双支柱，供融合与蒸馏使用。",
+      "graph_node": "pano360_integrations_uetrack_arena_protocol"
+    },
+    {
+      "id": "odtrack_finetune",
+      "name": "ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）",
+      "category": "域微调 · 训练",
+      "status": "验证中（组件候选）",
+      "period": "决赛冲刺（2026-08-22 ~）",
+      "summary": "用官方 130 序列（train95/valid35 划分，valid 绝不训练）对 ODTrack 微调，产出 ft_ep1-8 与 failure-balanced v4/v5 系列。目标是域自适应，但 medium 30 上无一超越基线的量级突破，作为组件保留。",
+      "metrics": [
+        {"name": "AUC", "value": "0.4535~0.4817", "scope": "medium 30 完整方法（ft_ep6/v4_ep4 等）"},
+        {"name": "SR", "value": "0.4962~0.5279", "scope": "medium 30"},
+        {"name": "AUC", "value": "0.5335~0.5479", "scope": "representative 9（ft_ep6/v4_ep4 等 core_keep）"},
+        {"name": "基线", "value": "ODTrack 0.5882 / 130 官方", "scope": "未超"}
+      ],
+      "architecture": "官方数据 train95（19/19/19/19/19 五折 OOF）→ 三平铺样本流 + 随机经度 roll → ODTrack 热启动（LR 1/10, 20 epoch）→ 逐 epoch checkpoint → representative/medium 快评通道。v4/v5 引入 failure-balanced 采样（sampler 读 GRT360_TRAIN_MANIFEST）。",
+      "tech_details": "**数据管道**：官方 130 序列按 seed 20260824 确定性划分 train95（32 real + 63 sim）/ valid35（15 real + 20 sim）；`make_official_split.py` 产出 split.json + seqlist；`prepare_finetune_data.py` 把 video+BFoV 转成三平铺训练样本流并**按消失段切分子序列**（官方数据有 11% 消失帧 (0,0,0,0)，评测 runner 掩码跳过，训练按消失段切割防止污染）。**训练清单**（`training_manifest.py`）：`build_spherical_training_manifest` 生成 leakage-safe 的 train95 清单，real/sim 采样质量平衡（sim 83 条多为 450/900 帧，real 47 条 ~1600 帧），5 折 OOF（19/19/19/19/19）支撑交叉验证；valid35 在任何清单中排除。**训练配置**（finetune_official.yaml / finetune_spherical_v5.yaml）：PRETRAIN=ODTrack_ep0300.pth.tar 热启动，LR=0.00001（原 0.0001 的 1/10），EPOCH=20，LR_DROP_EPOCH=15，SAMPLE_PER_EPOCH=15000，AMP；v5 用 failure-balanced 采样（sampler 读 GRT360_TRAIN_MANIFEST 的 capped 权重，困难序列更高采样概率），并加随机经度 roll 增强。**依赖补丁**：`torch._six`、visdom 桩、loader 去掉 torch._six 引用（py3.8 时代代码适配 py3.12）。",
+      "pros": [
+        "建立了无泄漏划分（valid35 永不训练）与五折 OOF 纪律",
+        "failure-balanced v5 是有据可依的训练策略创新",
+        "多个 checkpoint 在 representative 上进入 core_keep（组件价值）",
+        "ft_v4_ep4/5 在 medium real 段 AUC 0.448/0.417 接近 sutrack_b224"
+      ],
+      "why_works": "**为什么微调没有突破基线**（结构性归因）：①**数据规模**——train95 只有 95 条序列（32 real + 63 sim），域漂移信息有限；ODTrack 原始训练集（LaSOT/GOT-10k/TrackingNet/COCO）规模大 2-3 个数量级，95 条官方数据不足以撼动预训练权重的主导地位。②**LR 1/10 的保守策略**——热启动 + 低学习率防止灾难性遗忘，但同时也限制了新域特征的吸收速度，20 epoch × 15000 samples/epoch 的预算偏小。③**三平铺输入已是最优适配**——ODTrack 已通过三平铺获得 360 域的大部分收益，微调是在『已经吃饱』的基线上再加菜，边际收益递减。**为什么 ft_v4_ep4/5 在 real 段略好**：failure-balanced 采样（困难序列更高权重）让模型在真实困难序列上更充分训练——real AUC 0.448/0.417 接近 sutrack_b224（0.4435），证明『训练数据平衡策略』方向正确。**为什么 representative 与 medium 不一致**：representative 9 条精选序列（难度均衡）放大了微调 checkpoint 在特定场景的增益；medium 30（更接近真实分布）拉平了差异——这正是项目用 medium 作为最终 gate 的机理。",
+      "cons": [
+        "medium 30 上无任何微调版超过 ODTrack 0.5882 基线",
+        "FPS 普遍 11-16（低于基线 29.9 与 sutrack 26）",
+        "train95 只有 95 条序列，域漂移收益有限",
+        "ft_ep1-4 / v4_ep2/3/6 在 representative 上被 drop"
+      ],
+      "scenarios": "域自适应候选；作为融合中的 sim/hard 专家或速度基线 peer；v5 训练仍在进行中（GPU0）。",
+      "files": ["integrations/odtrack/finetune_spherical_v5.yaml", "panotrack/data/training_manifest.py", "scripts/prepare_finetune_data.py"],
+      "decision": "组件级保留（core_keep 的进融合池，drop 的不投入）；v5 结果待 checkpoint watcher 产出后评估。",
+      "graph_node": "panotrack_data_training_manifest"
+    },
+    {
+      "id": "sutrack",
+      "name": "SUTrack（B224 / T224）",
+      "category": "通用 SOT · 自回归",
+      "status": "核心候选（精度/快路径双线）",
+      "period": "决赛冲刺（2026-08-24 ~）",
+      "summary": "SUTrack（自回归单目标跟踪器，AAAI 2025）B224/T224 双尺寸接入。**B224 官方 all130 首超 ODTrack 基线（AUC 0.6113 vs 0.5882）**，成为当前最强单模型；T224 是快路径核心（39 FPS）。与 ODTrack 清晰互补（36 修复 vs 16 退步序列）。",
+      "metrics": [
+        {"name": "B224 AUC", "value": "0.6113", "scope": "官方 all130（首超 ODTrack 基线 0.5882）"},
+        {"name": "B224 SR", "value": "0.7223", "scope": "官方 all130"},
+        {"name": "T224 AUC", "value": "0.5598", "scope": "官方 all130"},
+        {"name": "FPS", "value": "28.9 / 39.0", "scope": "B224 / T224 all130"}
+      ],
+      "architecture": "SUTrack-B/L 骨干（HF 权重，xche32/SUTrack），自回归时序输出；ERP 适配采用三平铺风格输入，valid35 bake-off 胜出后扩至 all130。",
+      "tech_details": "**SUTrack（AAAI 2025）**：自回归（autoregressive）单目标跟踪器，与 ODTrack 同属『以历史目标状态预测下一帧』范式。LaSOT 75.2（L384），GOT-10k 81.5，权重经 HuggingFace（xche32/SUTrack）分发——断网镜像打包最方便。**本队接入**：B224 与 T224 两个尺寸变体，模板/搜索尺寸与输入分辨率成比例缩放（B=base 224、T=tiny 224）；ERP 适配沿用三平铺输入（目标跨经度边界时保证搜索图内无接缝），通过 eval_official.py 的 sutrack 后端 + `--sutrack-workspace`/`--sutrack-config`/`--sutrack-ckpt` 参数驱动。**bake-off 流程**：GPU1 valid35 先行（~10 分钟/候选），B224/T224 锁后扩至 all130；E2E FPS 高于 30 的候选进入全量比较。**medium 实证**：B224 AUC 0.4919（real 0.4435 / sim 0.5551）、FPS 26.0；T224 AUC 0.4614（real 0.4783 / sim 0.4393）、FPS 39.5。B224 的 sim 域明显强于 real 域（0.555 vs 0.443），T224 相反（real 0.478 > sim 0.439）——尺寸/容量对不同场景域的影响不对称。",
+      "pros": [
+        "B224 medium 精度第一（0.4919），real/sim 均衡（0.4435/0.5551）",
+        "T224 39.5 FPS 且 rep AUC 0.5632——速度-精度平衡最佳",
+        "自回归范式与 ODTrack 同源，适配成本低",
+        "HuggingFace 权重断网打包最方便"
+      ],
+      "why_works": "**为什么 B224 是 medium 精度最稳**（结构归因）：B（base）变体 224 输入在容量与分辨率间取得平衡——比 T（tiny）有更强的特征容量（自回归时序建模更充分），比 384 输入（L 变体）推理更稳（目标占比更高、无过度下采样）。其自回归范式（用前序目标状态预测下一帧）与 ODTrack 同源，跨帧外观积累使其在长时序列上优于单帧匹配器。**为什么 B224 sim 强于 real（0.555 vs 0.443）、T224 相反（real 0.478 > sim 0.439）**：容量-速度权衡的交互——B224 的强容量在 sim 域（目标外观更规则、运动更极端）能充分建模『大运动+外观保持』；T224 的轻量结构在 real 域（光照变化、形变）反而因『不过拟合仿真统计』而更稳健。**为什么 T224 达到 39.5 FPS**：tiny 骨干 + 224 搜索图，计算量约为 384 输入的 1/3，且无三平铺 3 倍拷贝（ERP 采样时环绕）。**为什么两者都低于 ODTrack 0.5882**：无 dense temporal memory（自回归但记忆深度不如 ODTrack 的 MEMORY_THRESHOLD=1000 token 序列）——这是 0.49 vs 0.58 差距的主因。",
+      "cons": [
+        "B224 FPS 26 未达 30 阈值（需 solo 复测 + 优化）",
+        "sim/hard 序列弱（seq_0046 0.077, seq_0011 0.264）",
+        "medium 整体仍低于 ODTrack 官方基线 0.5882"
+      ],
+      "scenarios": "融合中的精度核心（B224）+ 快路径主干（T224）；最可能的『提交主干』候选组合。",
+      "files": ["scripts/remote/grt360_phase2_gpu1_queue.sh", "integrations/sutrack/"],
+      "decision": "保留为核心：B224 精度线 + T224 速度线，Phase 2 GPU1 bake-off 已推进至 all130。",
+      "graph_node": "scripts_remote_grt360_phase2_gpu1_queue"
+    },
+    {
+      "id": "lorat",
+      "name": "LoRAT（B378/L378，LoRA 高效跟踪）",
+      "category": "通用 SOT · LoRA 微调",
+      "status": "真实场景专家（保留）",
+      "period": "决赛冲刺（2026-08-21 ~）",
+      "summary": "LoRAT（ECCV 2024，LoRA 参数高效微调跟踪器，码基最现代）接入。representative 上精度最强（AUC 0.6021 / SR 0.7275），但 medium 速度慢（8.7 FPS）且泛化衰减，定位为真实场景精度专家而非主干。",
+      "metrics": [
+        {"name": "rep AUC", "value": "0.6021", "scope": "representative 9（全场最高）"},
+        {"name": "rep SR", "value": "0.7275", "scope": "representative 9"},
+        {"name": "medium AUC", "value": "0.4725", "scope": "medium 30"},
+        {"name": "FPS", "value": "8.7", "scope": "medium 并发"}
+      ],
+      "architecture": "LoRAT（DINOv2 骨干 + LoRA 适配，B-378/L-378 变体），接入方式与 ODTrack 类似三平铺 ERP 适配；外部仓库 `external/LoRAT`（源码+权重 base.bin 校验入库）。",
+      "tech_details": "**LoRAT（ECCV 2024，『Tracking Meets LoRA』）**：核心贡献是把**低秩适配（Low-Rank Adaptation, LoRA）**引入视觉跟踪——冻结大规模预训练 backbone（DINOv2），只训练注入的 LoRA 低秩矩阵（W' = W + ΔW = W + BA，B∈R^{d×r}, A∈R^{r×d}，r 为秩），用极少量可训练参数（<1%）达到全量微调性能。DINOv2 的强语义特征使模型在真实场景（光照变化、形变、相似物干扰）下鲁棒。**变体**：B-224/B-378/L-378（base/large × 输入分辨率 224/378），B378 在 4090 上 285 FPS。**接入**：外部仓库 `external/LoRAT`（trackit 框架，纯 PyTorch 2.x 无 mmcv，升 torch 2.7+cu128 工程量最小），权重 base.bin 已校验入库；pano360 的 eval_official.py 通过 `build_lorat_tracker()` + `attach_lora_state_dict_hooks_()` 加载 LoRA 权重（graphify 图谱证实该耦合是实际依赖面）。**medium 实证**：representative AUC 0.6021 全场最高（real 0.6873 / sim 0.4315），但 medium 30 仅 0.4725、8.7 FPS——大输入（378）+ 慢骨干使其泛化与速度双双衰减。",
+      "pros": [
+        "representative 精度全场第一（0.6021）",
+        "real 域专家：real AUC 0.4656 > sim 0.4815，真实场景 win 5 seq",
+        "LoRA 参数高效，码基纯 PyTorch 2.x 无 mmcv，升 cu128 工程量最小",
+        "B378 在 4090 上 285 FPS（若换装可解决速度问题）"
+      ],
+      "why_works": "**为什么 representative 精度全场第一（0.6021）**（结构归因）：DINOv2 是自监督预训练的视觉基础模型，其特征对光照、形变、相似物干扰具有极强的语义鲁棒性——real 域（真实光照/运动/遮挡）正是 DINOv2 特征的舒适区。LoRA 只训练低秩增量（ΔW=BA），冻结 backbone 主体，保留了 DINOv2 的完整通用表征能力（不会像全量微调那样破坏预训练特征），这是 real AUC 0.6873 遥遥领先的结构性原因。**为什么 medium 泛化衰减（0.6021→0.4725）**：①**输入分辨率 378**——搜索图更大、目标占比更高，但对 4K 全景小目标仍不够，且推理成本高（8.7 FPS）；②**变体与数据**：B/L-378 在官方分布（1440×720）下的目标尺寸与 378 输入匹配度不如 224 变体；③representative 9 条精选序列放大了其真实场景优势，medium 30 的 sim/hard 序列（seq_0044 0.083、seq_0052 0.050）拉平了均值。**为什么速度慢**：DINOv2 大骨干 + 378 输入 = 每帧计算量数倍于 224 轻量模型；B378 的 285 FPS 是 4090 纯推理口径，端到端（解码+预处理）仍被整体链路拖累。**定位机理**：它是『真实场景高精度专家』而非『全量主干』——融合中只在 real 域/低置信帧调用可扬长避短。",
+      "cons": [
+        "medium 速度 8.7 FPS 太慢，泛化衰减（0.60→0.47）",
+        "graphify 图谱显示其与 pano360 评测脚本深度耦合（实际依赖面）",
+        "大分辨率输入（378）推理成本高"
+      ],
+      "scenarios": "真实场景/高精度专家：仅在低置信帧或 real 域调用慢专家；分析其成功序列特征作为『何时重定位』启发。",
+      "files": ["external/LoRAT/", "scripts/eval_official.py（LoRAT 后端）"],
+      "decision": "保留为真实场景专家参考；不作为主干；若融合只在少数低置信帧调用可严控调用率使用。",
+      "graph_node": "external_lorat"
+    },
+    {
+      "id": "odtrack_recapture",
+      "name": "ODTrack + Recapture 外挂（判丢 + 球面重捕获）",
+      "category": "系统级外挂 · 可靠性门控",
+      "status": "已实测（drop）",
+      "period": "2026-08-10 ~ 08-14",
+      "summary": "给 ODTrack 装『判丢 + 全图找回』外挂：ReliabilityGate（多信号融合判丢）+ TemplateMemory + 多切平面重检测。针对 10 条失锁序列设计，目标是救回一半（+0.02~0.04），但 representative 实测 AUC 0.3981 被 drop。",
+      "metrics": [
+        {"name": "rep AUC", "value": "0.3981", "scope": "representative 9（odtrack_recapture）"},
+        {"name": "rep AUC", "value": "0.4007", "scope": "representative 9（+ft_ep7 变体）"},
+        {"name": "FPS", "value": "23.0~23.7", "scope": "representative"},
+        {"name": "基线", "value": "ODTrack 0.5882 / 130 官方", "scope": "大幅回退"}
+      ],
+      "architecture": "OdtrackRecaptureTracker（BaseTracker 契约）：ODTrack 逐帧 + ReliabilityGate（C_visual/anchor/motion/scale/geometry 五信号，多信号融合防自信错跟）+ TemplateMemory（门控写入，anchor 永不被覆盖）+ SphericalMultiViewRedetector（redetect_v3，12 视角×3 尺度多模板池）→ LOST 后每 K=5 帧搜索 → VERIFY（分数+anchor 一致性+运动合理）→ REINIT（清空污染记忆）。",
+      "tech_details": "**判丢公式**（`_reliability`，线性 logit + sigmoid，权重来自离线 60/60 标定）：`logit = w_motion·(C_motion−0.5) + w_scale·(C_scale−0.5) + w_ncc·(C_anchor−0.5) − w_geom·geometry_risk`，`R = 1/(1+e^{−logit})`。四信号：C_motion=预测中心与圆周恒速外推的球面距离归一化；C_scale=框面积 log 变化 vs EMA；C_anchor=预测框 crop 与 anchor 模板的 NCC（归一化 (sim+1)/2）；geometry_risk=极区 |lat|>55° 或 seam 距离 <12%W 的风险项。C_visual（last_pred_iou）实测 Pearson +0.391、判丢区分度 0.747，但因服务器不可用仅有 10 序列证据，权重置 0。**VERIFY 三门槛**：①NCC score ≥ recapture_min_score（0.45）；②候选 crop 与 anchor 归一化相似度 (sim+1)/2 ≥ 0.5（防锁错相似目标；注意原始 NCC 阈值无意义——4K 正常帧原始 NCC 均值仅 ~0.22）；③候选中心与失锁前位置的球面角距离 ≤ motion_max_deg（90°）。**多视角重检测**（redetect_v3 `search`）：6-8 个经度切平面视角（view_centers）→ 每视角 ERP 窗口降采样 2× → highpass 灰度 → 对模板池（anchor + 高可靠短/长记忆）逐尺度（template_scales）算 NCC 响应场 → 亚像素峰值（_subpixel_peak）→ 局部像素映射回 ERP（x 回绕）。**REINIT**：用候选框重新 tracker.initialize（三平铺帧 + 框居中），彻底清空被污染的 dense temporal memory，再 OBSERVE 3 帧防立即失锁。",
+      "pros": [
+        "方案设计完整：判丢多信号融合（单信号有反例 0004）、VERIFY 防误锁、REINIT 防记忆污染",
+        "last_pred_iou 相关性实测（Pearson +0.391，判丢区分度 0.747）支持信号方向",
+        "『宁可继续 LOST 不可锁错』的诚实边界与 60/60 留出标定纪律",
+        "多切平面重检测（禁直接喂整张 ERP）有 360VOT Issue #11 文献证据"
+      ],
+      "why_works": "**为什么方向正确但实测 drop（0.3981）**（结构性归因）：①**重检测器能力不足**——redetect_v3 的全局搜索用 NCC 在 6-8 个切平面视角做模板匹配，但 4K 全景上 NCC 对『外观变化后的目标』召回率低（recapture 的 VERIFY 门槛严格，宁可 LOST）；NCC 模板匹配在失锁场景的失败模式与 NCC 基线同源——外观变化使相关性衰减。②**判丢信号权重证据有限**——C_visual（last_pred_iou）只有 10 序列证据权重置 0，离线代理信号（motion/scale/anchor）在真实失锁瞬间（快速移动、遮挡）易误判，导致过早/过晚进入 LOST。③**每 K=5 帧搜索的预算**——CPU NCC 全局搜索每次 <2s，但失锁期间目标可能已离开所有切平面视角的覆盖（极区/快速横穿）。**为什么这个失败仍有价值**：它证明『判丢+重捕获』的架构思路是对的（360VOT Issue #11 也支持多切平面），失败的是 NCC 这个重检测器——经验直接沉淀进 adaptive_spherical（四态状态机 + 球面运动证据 + 专家预算），并把重检测升级为『稀疏专家探测』而非全图 NCC。**对比**：representative 0.3981 比纯 ODTrack 基线低 20 个点——外挂的误锁/漏找回代价大于救回收益，验证了『宁可不做不可做错』的工程判断。",
+      "cons": [
+        "representative 实测 0.3981 大幅低于 ODTrack 基线（0.59 量级）——外挂净收益为负",
+        "重捕获 CPU NCC 开销拖慢 FPS（23 vs 纯 ODTrack 29.9）",
+        "server 不可用时置信度信号改用离线代理，标定证据有限",
+        "VERIFY 双模板一致性 v1 未实现，防误锁能力打折"
+      ],
+      "scenarios": "失败（drop）。方向正确但实现/标定不成熟：recapture 需要更准的判丢信号与更强的重检测器（如 YOLO-World/SAM2），单纯 NCC 重检测在 4K 全景上召回不足。",
+      "files": ["integrations/odtrack/recapture.py", "docs/ODTRACK_RECAPTURE_PLAN_ZH.md", "panotrack/pipeline/redetect_v3.py"],
+      "decision": "representative drop，不投入 full medium。经验沉淀进 Phase 2 的 adaptive_spherical 状态机（NORMAL/SUSPECT/LOST/VERIFY 四态 + 球面运动证据）。",
+      "graph_node": "pano360_integrations_odtrack_recapture"
+    },
+    {
+      "id": "fusion_family",
+      "name": "融合族（fusion_2way ~ 8way）",
+      "category": "多模型融合",
+      "status": "已实测（增益有限）",
+      "period": "决赛冲刺（2026-08-24 ~）",
+      "summary": "对全部候选做组合融合（2/3/4/5/6/8-way，含 v1v4/ep7 变体）。30/30 最优 fusion_5way AUC 0.522，仅比单模型最好（sutrack_b224 0.4919）高 3 个点，远低于 oracle 上限 0.5779。",
+      "metrics": [
+        {"name": "fusion_5way AUC", "value": "0.522", "scope": "medium 30（最优）"},
+        {"name": "fusion_4way AUC", "value": "0.522", "scope": "medium 30"},
+        {"name": "fusion_3way AUC", "value": "0.510", "scope": "medium 30"},
+        {"name": "oracle 上限", "value": "0.5779", "scope": "medium 30 逐序列最优"}
+      ],
+      "architecture": "多模型结果级融合（不同组合：精度专家 + 快路径 + 微调族），sequence_expert 路由（按序列 ID 选择最优方法）或加权投票。fusion_6way 系列引入 v4 微调族与 ep7。",
+      "tech_details": "**融合范式**：结果级（late fusion）——各 tracker 独立跑完全序列输出逐帧 bbox，融合层按策略选框，不共享中间特征。**两种路由策略**：①`sequence_expert`：按序列 ID 固定选择该序列在验证集上的最优方法（oracle 式，训练集泄漏风险——测试集序列 ID 未知，实际部署不可用）；②加权投票/均值：多模型 bbox 按置信度加权。**组合方式**（eval_fusion.py）：2way（sutrack_b224+lorat 类）、3way（精度+快路径+微调）、4way/5way（fusion_5way = 精度专家×2 + 快路径×2 + 微调）、6way（5way+v4 微调族）、8way（全组合）；v1v4/ep7 变体替换微调族来源。**关键实证**：fusion_5way AUC 0.522 > 单模型最好 0.4919（+3.0 点），但 oracle 上限 0.5779（逐序列选最优）——简单融合只捕获了多样性收益的一小半；FPS 多为 nan（并发评测未 solo 复测）。**两组件 oracle 对**（component_diagnostics）：fusion_3way+fusion_6way_v4 0.552、fusion_6way_v4+lorat 0.551、lorat+sutrack_b224 0.547——含 lorat 的对精度最高，印证其专家价值。",
+      "pros": [
+        "全部组合超过单模型最好（0.4919→0.522）",
+        "简单投票/专家路由即可稳定 +3 个点",
+        "『按序列选最优』的 oracle 验证了多样性的存在（0.5779）"
+      ],
+      "why_works": "**为什么融合有效（+3 点）**（结构归因）：不同 tracker 的失效模式互补——ODTrack 系（dense memory）在长时稳定序列强、SUTrack（自回归）在 sim 域强、LoRAT（DINOv2）在 real 域强、UETrack（轻量）在简单帧快——结果级融合取『多数一致/高置信』时天然压制单一模型的系统性偏差（如 ODTrack 的失锁污染、LightFC 的外观漂移）。**为什么只到 0.522（距 oracle 0.5779 差 5.6 点）**：①**融合在错误方向上也融合**——加权投票无法识别『哪个模型此刻是对的』，只会平均；②**sequence_expert 的 oracle 上界**——按序列 ID 选最优是事后最优（含泄漏），真实部署没有序列 ID 先验，动态路由（置信度/状态）才能逼近；③**模型相关性**——同族变体（ft_ep6/7/8）高度相关，融合增益递减（fusion_8way 0.490 反而不如 5way 0.522）。**为什么含 lorat 的对精度最高（oracle 对 0.547-0.552）**：LoRAT 的 DINOv2 特征与其它模型（CNN/轻量 transformer）差异最大——多样性（模型异质性）是融合收益的来源，同构模型融合无增量。**部署意义**：融合的 +3 点是『零训练』的保底增益，但 0.8 目标需要动态路由（adaptive_spherical）而非静态组合。",
+      "cons": [
+        "融合增益天花板明显：0.522 离 0.5779 oracle 还有 5.6 个点",
+        "sequence_expert 依赖序列 ID（训练集泄漏风险，测试集不可用）",
+        "FPS 多为 nan/并发观测，速度未验证",
+        "离提交目标 0.8 差距巨大——组合已知方法填不平"
+      ],
+      "scenarios": "低风险增益项：融合作为提交方案的保底提升（+3 点）；但按序列 ID 路由不可用于隐藏测试集，必须换成置信度/状态驱动的动态路由。",
+      "files": ["scripts/eval_fusion.py", "panotrack/evaluation/failure_matrix.py"],
+      "decision": "保留为基线增益；结论：简单融合不是通往 0.8 的路，需要自适应状态机（adaptive_spherical）或反事实路由（train_counterfactual_router）。",
+      "graph_node": "scripts_eval_fusion"
+    },
+    {
+      "id": "causal_dtp",
+      "name": "Causal-DTP-ERP（教师-学生路由）",
+      "category": "多模型路由 · 创新实验",
+      "status": "已实测（保守路由保护教师）",
+      "period": "2026-08-10 ~",
+      "summary": "教师（ODTrack 三平铺）+ 学生（UETrack ERP-wrap）+ Scout（LightFC）三模型，Scout 判定难度后决定是否调用教师。当前保守路由保护 ODTrack 精度（AUC 与 ODTrack 相同 0.5792），未带来增量。",
+      "metrics": [
+        {"name": "AUC", "value": "0.5792", "scope": "与 ODTrack 相同（保守路由）"},
+        {"name": "SR", "value": "0.6532", "scope": "同上"},
+        {"name": "FPS", "value": "8.99", "scope": "教师调用率未降"}
+      ],
+      "architecture": "Scout（LightFC）低开销预判 → 难度路由：简单帧走学生（UETrack 快路径），难帧调教师（ODTrack 精度）。意图是降低教师调用率换速度，同时保精度。",
+      "tech_details": "**教师-学生-侦察三模型路由**：教师=ODTrack ERP 三平铺（AUC 0.5792 精度锚点），学生=UETrack ERP-wrap（57 FPS 快路径），Scout=LightFC ONNX（CPU 可跑的低开销预判器）。**路由策略**：Scout 逐帧输出置信度/难度信号 → 低于阈值的帧调用学生（快路径），高于阈值（疑似困难/失锁）才调用教师（精度路径）。**实现**（scripts/fuse_causal_dtp_erp.py）：`fuse_sequence` 按帧融合两路输出，`circular_blend_box` 做跨界框的循环融合（经度环绕语义下的框混合），`fuse_geometry_experts` 融合几何专家。**当前状态**：保守路由——Scout 判难不充分时全部回退教师，结果 AUC/SR/FPS 与纯 ODTrack 完全一致（0.5792/0.6532/8.99），即路由未带来任何增量。**设计意图**：先保精度（教师全调），后续训练学生模型后逐步降低教师调用率，兑现速度收益。",
+      "pros": [
+        "思路正确：难度感知路由是融合的正确方向",
+        "教师-学生蒸馏路线为后续留了伏笔（学生模型训练后减少教师调用）",
+        "与 Phase 2 专家路由/反事实路由同源"
+      ],
+      "why_works": "**为什么思路对但没兑现**（结构性归因）：难度感知路由的前提是『Scout 能可靠区分简单/困难帧』——但 LightFC 作为 Scout 的判难信号（其置信度/响应）与真实难度（ODTrack 是否会失锁）相关性未经标定，保守路由直接回退教师，导致 100% 教师调用。**为什么保守路由 AUC 与 ODTrack 完全相同**：代码路径上简单帧也走教师（Scout 判难阈值保守），等于没有路由——0.5792/0.6532/8.99 三个数字与 ODTrack 逐位一致，是『路由未生效』的直接证据。**什么条件下会有效**：①Scout 换成与教师失锁模式强相关的信号（如 anchor 相似度、运动一致性——recapture 已证明这些离线信号有区分度 0.747）；②学生模型训练完成（知识蒸馏让 UETrack 逼近 ODTrack 精度），简单帧用学生不掉点；③路由阈值用 60/60 留出标定而非启发式。**与 adaptive_spherical 的关系**：Causal-DTP 是『帧级二元路由』（简单/困难），adaptive 是『四态状态机 + 稀疏专家』——后者是前者的超集，这也是 Causal-DTP 被降级为叙事的原因。",
+      "cons": [
+        "保守路由=教师全调，无速度收益（8.99 FPS 未变）",
+        "Scout 判难度能力未经严格验证",
+        "结果级路由增益有限（报告中明确『留作叙事』）"
+      ],
+      "scenarios": "创新实验版：验证了路由框架可行性；需真实学生模型 + 可靠 Scout 才能兑现速度收益。",
+      "files": ["scripts/fuse_causal_dtp_erp.py", "configs/grt360_balanced.json"],
+      "decision": "不替代两套基线；留作答辩叙事与路由研究起点。",
+      "graph_node": "pano360_scripts_fuse_causal_dtp_erp"
+    },
+    {
+      "id": "adaptive_spherical",
+      "name": "adaptive_spherical（自适应球面状态机）",
+      "category": "自适应系统 · Phase 2 创新",
+      "status": "开发中（v1 未过 micro gate，v2 排队）",
+      "period": "Phase 2（2026-08-26 ~）",
+      "summary": "Phase 2 的核心自研：NORMAL/SUSPECT/LOST/VERIFY 四态状态机 + 球面运动证据 + anchor 校验 + 稀疏专家 token 预算 + 延迟自适应调用 + 状态化专家片段。首个 micro gate（seq_0046 前 80 帧）复现 T224 结果但多付 20% B224 探测开销，v1 未晋升。",
+      "metrics": [
+        {"name": "AUC", "value": "0.3623", "scope": "micro gate seq_0046 前 80 帧（=SUTRACK-T224）"},
+        {"name": "SR", "value": "0.5570", "scope": "同上"},
+        {"name": "E2E FPS", "value": "21.8", "scope": "v1（T224 纯跑 35.7）"},
+        {"name": "专家 P95", "value": "58ms vs 主干 28ms", "scope": "trace 实测"}
+      ],
+      "architecture": "NORMAL（主干快跟踪）→ 球面运动证据触发 SUSPECT → 连续低置信 LOST → 稀疏专家（B224 等）按状态片段调用（非孤立探测）→ VERIFY（anchor 相似 + 运动合理 + 分数门槛）→ 恢复或保持 LOST。专家预算由实测 33.3ms 帧目标计算，延迟自适应调节调用率。",
+      "tech_details": "**四态状态机**（AdaptiveSphericalTracker，`AdaptiveStatus`）：NORMAL → SUSPECT（quality < suspect_quality 或运动异常/anchor 相似度低，连续 suspect_run 帧）→ LOST（quality < lost_quality 连续 lost_run 帧）→ VERIFY（专家候选通过 _verify_candidate）→ NORMAL（连续 verify_frames 帧 quality ≥ recover_quality）。**证据函数**（_evidence）：融合主跟踪器 quality、响应熵、anchor 相似度（_anchor_similarity）、球面运动一致性（_angular_distance + SphericalState 更新）、尺度变化，产出 policy_score 驱动 LinearRiskPolicy。**专家预算**（ExpertBudget）：由实测帧目标 33.3ms（30 FPS）与主/专家延迟 EMA（_update_latency_budget，latency_ema_alpha 平滑）计算 call_fraction 与专家 token 预算——保证专家调用不突破实时预算。**状态化专家片段**（expert_episode_remaining）：专家一旦被接受就连续运行 expert_episode_frames 帧（短状态片段），而非每帧孤立探测——避免每次重置慢专家的初始化开销（v1 教训：孤立探测导致 20% 额外 B224 开销却只复现 T224 结果）。**恢复判据**：expert_better（专家 quality ≥ 主 × 系数）或 recovery_vote（主 quality < lost_quality 且专家 ≥ expert_quality），且两路框 agreement < disagreement_iou 才切换。**trace 输出**：逐帧 trace.jsonl（route_reasons/expert_used/latency_ms/各子延迟），latency.json 汇总。",
+      "pros": [
+        "四态状态机 + 球面运动证据 = 全景域正确的自研方向",
+        "状态化专家片段（episode）优于孤立探测（避免每次重置慢专家）",
+        "trace.jsonl / latency 输出使瓶颈可测量（主干 P95 28ms）",
+        "sparse expert token 预算有实测帧目标支撑"
+      ],
+      "why_works": "**为什么这是通往 0.8 的最现实路线**（结构性论证）：简单融合只做『结果级组合』（0.52），而 adaptive 在**系统级**引入三个文献级缺口的解法——①**判丢**：球面运动证据（_angular_distance + SphericalState）是全景域特有的强判丢信号（目标在球面上运动有几何一致性，异常即可疑），比 recapture 的 NCC 代理信号更本质；②**找回**：状态化专家片段（episode）避免『每次探测都重置慢专家』——v1 失败（孤立探测多付 20% 开销）证明『如何调用专家』与『选哪个专家』同等重要；③**预算**：ExpertBudget 用实测帧目标（33.3ms）+ 延迟 EMA 动态调专家调用率，把『自适应』从启发式变成闭环控制。**为什么 v1 micro gate 未过（复现 T224 却多付 20% 探测）**：B224 专家与 T224 主干精度差仅 3 点（0.4919 vs 0.4614），在 80 帧窗口内专家几乎没有机会展示优势，而每次探测都付 B224 的初始化延迟——**专家选择空间不足**是 v1 失效的机理（要换更分化的专家如 lorat/SAM2，或只在 LOST 后调用）。**为什么 trace 是它的杀手锏**：trace.jsonl 把每帧的路由原因/子延迟落盘，使『调参』变成『数据驱动的归因』（主干 P95 28ms vs 专家 58ms 是 v2 设计的直接依据）。",
+      "cons": [
+        "v1 复现 T224 结果却多付 20% 探测开销——路由收益未兑现",
+        "micro gate 样本太小（80 帧 1 序列），不代表全量",
+        "专家选择（B224）与主干（T224）差距仅 3 个点，路由收益空间有限",
+        "全序列 episode 验证仍在排队"
+      ],
+      "scenarios": "通往 0.8 目标的最现实技术路线（架构级增量而非组合已知方法）；需全序列验证 + 更优专家组合（lorat 真实场景专家等）。",
+      "files": ["panotrack/pipeline/adaptive_spherical.py", "panotrack/pipeline/risk_policy.py", "scripts/eval_official.py"],
+      "decision": "v2（stateful episode）已实现并排队全序列 gate；是当前唯一有架构级增量的方向。",
+      "graph_node": "panotrack_pipeline_adaptive_spherical"
+    },
+    {
+      "id": "spherical_memory",
+      "name": "Spherical Memory（球面记忆）",
+      "category": "全景专项 · 记忆增强",
+      "status": "已实现（配置存在，未进入赛马主线）",
+      "period": "2026-08 中旬",
+      "summary": "自研球面记忆模块（spherical_memory 配置/模型存在：24 通道，模板 64，update_threshold 0.45），用于模板更新与球面状态记忆，作为可选 tracker 接入。未出现在 medium/representative 赛马结果中。",
+      "metrics": [
+        {"name": "配置", "value": "channels=24, template_size=64", "scope": "configs/grt360_spherical_memory.json"},
+        {"name": "状态", "value": "未进入赛马主线", "scope": "medium/representative 无结果"}
+      ],
+      "architecture": "SphericalMemoryTracker：球面状态 + 模板记忆（update_threshold 门控）+ motion_prior。作为 panotrack 原生 tracker 可选接入。",
+      "tech_details": "**球面状态表示**（panotrack/models/spherical_memory.py + trackers/spherical_memory.py）：以 24 通道特征（channels=24）编码球面局部区域，template_size=64 的模板特征随帧更新。**门控更新**：update_threshold=0.45——仅当当前匹配质量超过阈值才把新帧外观写入模板记忆，防止被遮挡/形变/相似物污染（与 recapture 的 TemplateMemory 门控思想同源）。**motion_prior**：开启运动先验（球面恒速外推辅助搜索中心），结合 redetect_interval=3 的重检测骨架。**配置路径**（configs/grt360_spherical_memory.json）：patch_size=255, sr_ratio=3.0, sr_min_fov=20.0, lost_score=0.25, lost_psr=3.0, lost_apce=0.5, max_lost_frames=30, hp_sigma=3.0, refine=false。**模型文件**：artifacts/grt360_spherical_memory.pt（合成 + 真实冒烟均通过 load）。**局限**：未进入 medium/representative 赛马主线，无全量验证数据支撑。",
+      "pros": [
+        "球面原生记忆设计与 360 域匹配",
+        "模板门控更新（0.45 阈值）防污染思想与 recapture 的 TemplateMemory 同源",
+        "为答辩提供『自研全景组件』素材"
+      ],
+      "why_works": "**为什么设计方向合理但无数据支撑**（结构性分析）：球面记忆（24 通道球面特征 + 门控模板更新）在理论上有两个正确动机——①ERP 全景的模板更新必须感知球面几何（同一目标在不同经度/纬度外观不同，门控更新避免把旋转后的外观当成污染）；②update_threshold=0.45 的门控防止遮挡/相似物写入记忆（与 recapture 的 TemplateMemory 同源、与 LoRAT 的『模板污染』问题对应）。**为什么没有进入赛马主线**：该方案是 panotrack 原生 tracker（轻量线 numpy/Pillow 依赖面），而赛马主线已切换为 ODTrack/SUTrack/UETrack 等 GPU 学习型跟踪器——其 24 通道手工特征（对比学习型 dense temporal memory）在容量上无法与 ViT 级特征竞争，属于『先验几何 vs 学习表征』路线的落败。**什么场景下它可能有价值**：作为融合中的『几何先验分支』（球面运动一致性 + 门控记忆为判丢提供独立信号），或作为无 GPU 的 CPU 兜底——与 adaptive_spherical 的 SphericalState（球面运动证据）思想同源，后者的实现实际上继承了它的几何洞察。",
+      "cons": [
+        "无赛马数据支撑（未跑 medium/representative）",
+        "模型 artifact（.pt）未在结果集中体现收益",
+        "与 ODTrack/SUTrack 等主力相比缺验证"
+      ],
+      "scenarios": "未验证的探索组件；若 Phase 2 时间允许可作为记忆增强实验对照，否则留作架构叙事。",
+      "files": ["panotrack/models/spherical_memory.py", "panotrack/trackers/spherical_memory.py", "configs/grt360_spherical_memory.json"],
+      "decision": "暂缓投入；以 ODTrack/SUTrack 主线的验证结果为准。",
+      "graph_node": "panotrack_models_spherical_memory"
+    },
+    {
+      "id": "spmtrack",
+      "name": "SPMTrack（CVPR 2025，LaSOT 最高可复现）",
+      "category": "调研候选 · 未实跑",
+      "status": "调研（未接入）",
+      "period": "调研 2026-08-21",
+      "summary": "CVPR 2025 通用 SOT，LaSOT AUC 77.4/76.8/74.9（G/L/B），公开可复现最高。LoRAT 码基同源，接入成本预估可控，但 360 域直接证据缺失，优先级低于三平铺适配收益。",
+      "metrics": [
+        {"name": "LaSOT AUC", "value": "77.4 / 76.8 / 74.9", "scope": "G / L / B 变体"},
+        {"name": "速度", "value": "未公布", "scope": "L 级别"}
+      ],
+      "architecture": "与 LoRAT 同码系（trackit 框架），CVPR 2025 冠军方法。",
+      "tech_details": "**SPMTrack（CVPR 2025，Sparsely Modulated Transformer Trackers）**：LaSOT AUC 77.4（G）/ 76.8（L）/ 74.9（B），为公开可复现最高。核心创新：在 transformer 跟踪器中引入**稀疏调制（sparse modulation）**机制——用可学习的稀疏门控选择性调制特征通道/token，在保持全局建模能力的同时降低冗余计算，缓解『模板污染』问题（模板特征随时间被遮挡/形变干扰）。**与 LoRAT 的关系**：同属 trackit 码系（LoRAT 团队延续工作），接入成本与 LoRAT 近似（纯 PyTorch 2.x、无 mmcv）。**360 域接入预期**：需 ERP 三平铺适配 + 360 域微调才能发挥（文献证据：LoRAT 接入 360VOT 官方框架微调后仅 0.495，未微调 0.461——适配收益 > backbone 差距）。**权重分发**：GDrive（B 变体待审批），断网打包不便。",
+      "pros": ["LaSOT 最高可复现", "与 LoRAT 码基同源，接入工程量小"],
+      "cons": ["360 域无直接证据", "权重 GDrive（B 待审批），断网打包麻烦"],
+      "why_works": "**为什么 LaSOT 最高（77.4）**（结构归因）：SPMTrack 的**稀疏调制（sparse modulation）**在 transformer 跟踪器上做两件事——①用可学习稀疏门控选择性调制特征通道/token，保留对目标判别最有效的子集，抑制背景/相似物响应（缓解模板污染）；②稀疏化同时降低计算冗余，使更大 backbone 可部署。LaSOT 的 2800+ 长时序列正好暴露『模板污染』问题（长时外观渐变 + 相似物干扰），稀疏调制直击该失效模式，故领先 4-5 个点。**为什么 360 域不能直接平移**（关键机理）：LaSOT 是透视相机、目标占比稳定；360VOT 是 ERP 全景，目标占比随纬度畸变剧烈变化（极区拉伸）、跨界频繁——文献证据（LoRAT-360 微调后仅 0.495）证明：**适配机制（三平铺/切图）的收益 > backbone 能力差距**。SPMTrack 若不重做 ERP 适配 + 360 微调，其 77.4 的 LaSOT 优势在 360 域会大幅缩水。**为什么优先级低于已接入方案**：O(n) 适配 + 微调成本 vs 边际收益（我们 0.5792 已是 360VOT 事实 SOTA），除非精度上限成为瓶颈。",
+      "scenarios": "若决赛后继续研究：换装『更准』路线的正解之一，需 ERP 三平铺适配 + 360 微调。",
+      "files": ["docs/TECH_RESEARCH_ZH_2026-08-21.md"],
+      "decision": "调研结论：优先级低于已接入方案的三平铺适配；仅当精度上限成为瓶颈时启动。",
+      "graph_node": "docs_tech_research_zh_2026_08_21"
+    },
+    {
+      "id": "samurai_sam2",
+      "name": "SAMURAI / SAM2 系（长时跟踪与重捕获）",
+      "category": "调研候选 · SAM 生态",
+      "status": "调研（未实跑）",
+      "period": "调研 2026-08-21",
+      "summary": "SAMURAI（SAM2.1 + Kalman 运动记忆，零训练）：LaSOT 74.2 / GOT-10k 81.7 / OTB100 71.5（与比赛同协议），全遮挡 +12.7%。SAM2 occlusion head 输出可见性分数 = 免费判丢信号，任意帧可重新注入 = 原生找回接口。",
+      "metrics": [
+        {"name": "LaSOT AUC", "value": "74.2", "scope": "SAMURAI（零训练）"},
+        {"name": "OTB100 AUC", "value": "71.5", "scope": "与比赛同协议"},
+        {"name": "显存", "value": "~4GB", "scope": "4090 实时"}
+      ],
+      "architecture": "SAM2.1 官方权重 + Kalman 运动记忆；不解决全局找回（只在预测邻域内选 mask）；360VOT 工具包自带 mask2Bfov 转换。",
+      "tech_details": "**SAMURAI（arXiv 2411.08372，『SAMURAI: Adapting Segment Anything Model for Zero-Shot Visual Tracking with Motion-Aware Memory』）**：零训练（zero-shot）长时跟踪器——复用 SAM2.1 官方权重，关键改动是把 SAM2 的朴素记忆替换为**运动感知记忆（motion-aware memory）**：用 Kalman 滤波预测目标运动，将预测位置作为记忆 token 的定位先验，显著降低遮挡/相似物干扰下的错误传播。LaSOT 74.2 / GOT-10k 81.7 / **OTB100 71.5（与比赛同 OTB 协议）**，全遮挡属性 +12.7%，~4GB 显存 4090 实时。**360 域关键点**：①SAM2 的 occlusion head 输出可见性分数 = 免费判丢信号；②任意帧 `add_new_points_or_box` 重新注入 = 原生找回接口；③但 SAMURAI 只在预测邻域内选 mask，**不解决全局找回**——需配合多切平面检测做 LOST 分支。**mask→BFoV**：360VOT 工具包自带 mask2Bfov/mask2Bbox，取最大连通域防遮挡碎块撑爆外接框。**域警告**：PanoSAM2（arXiv 2604.07901）证明 SAM2 在 360VOTS 有 ~60 J&F 基本盘但接缝/畸变是主要损失源。",
+      "pros": ["零训练直接可用", "遮挡/长时最强（LaSOT_ext 61.0 领先 7 点）", "免费判丢信号 + 原生找回接口", "360VOT 工具包转换现成"],
+      "cons": ["不解决全局找回（需配合多切平面检测）", "SAM2.1 栈较大，断网镜像体积压力", "PanoSAM2 证明 SAM2 在 360VOTS 接缝/畸变是主要损失源"],
+      "why_works": "**为什么遮挡/长时最强（LaSOT_ext 61.0 领先 7 点）**（结构归因）：SAM2.1 是 promptable 分割基础模型，其记忆机制（memory bank）在遮挡时保留目标历史 mask；SAMURAI 的关键升级是**运动感知记忆**——Kalman 滤波预测目标位置作为记忆 token 的定位先验，遮挡恢复时 SAM2 的 mask 选择被运动先验引导，避免被遮挡物/相似物带偏（全遮挡 +12.7% 即此机理）。**为什么是 recapture 失锁分支的理想升级**：①SAM2 的 occlusion head 输出可见性分数——比我们 recapture 的 NCC 代理判丢信号更本质（直接建模『目标是否可见』）；②`add_new_points_or_box` 可任意帧重新注入目标 = 原生找回接口，无需自研重检测器；③mask→BFoV 转换用 360VOT 工具包现成函数（取最大连通域防碎块撑爆外接框）。**为什么不能直接当主干**：SAMURAI 只在预测邻域内选 mask（无全局找回），且 ERP 全景的接缝/畸变是 SAM2 的主要损失源（PanoSAM2 证明）——需配合多切平面检测 + 环绕 padding 才能用于全景。**定位**：recapture v2 的『判丢信号双分支 + 重捕获』最强候选，而非提交主干。",
+      "scenarios": "recapture 失锁分支的最强候选：LOST 时用 SAM2 在切平面视角选 mask → mask2Bfov；或作为判丢信号双分支。",
+      "files": ["docs/TECH_RESEARCH_ZH_2026-08-21.md"],
+      "decision": "调研结论：作为 recapture v2 的重检测/判丢升级项保留；v1 因 representative drop 未到接入阶段。",
+      "graph_node": "docs_tech_research_zh_2026_08_21"
+    },
+    {
+      "id": "aiatrack360",
+      "name": "AiATrack-360（公开文献 SOTA 对照）",
+      "category": "调研对照 · 文献标杆",
+      "status": "调研（对照基线）",
+      "period": "调研 2026-08-21",
+      "summary": "TPAMI 2025 全景单目标跟踪公开榜首（S_dual 0.534），官方框架集成。我们本地 0.5792 已超出 +8.4%，2025-2026 无人刷新。",
+      "metrics": [
+        {"name": "S_dual AUC", "value": "0.534", "scope": "TPAMI 2025 Table III"},
+        {"name": "我们的对比", "value": "0.5792", "scope": "超出 +8.4%"}
+      ],
+      "architecture": "AiATrack（注意力增强跟踪）+ 360VOT 官方框架集成，tangent crop 搜索图。",
+      "tech_details": "**AiATrack（ECCV 2022 / TPAMI 2025）**：以 attention 增强的视觉跟踪器——在孪生/transformer 基线上引入**目标感知注意力（target-aware attention）**与**时间语义关联（temporal semantic association）**，缓解遮挡与相似物干扰下的模板退化。TPAMI 2025 版集成进 360VOT 官方框架，以 **tangent crop（切平面投影搜索图）** 方式适配全景：目标中心投影到切平面、裁剪无畸变局部图送入跟踪器（替代我们用的三平铺）。**公开成绩**：S_dual AUC 0.534（360VOT 官方榜 TPAMI 2025 Table III 榜首），2025-2026 无新全景跟踪架构发表刷新。**与我们方案的对照意义**：①我们本地 0.5792 超其 +8.4%，成为『公开文献事实 SOTA』的答辩锚点；②tangent crop 集成 +12.9%（vs 官方基线）说明切平面搜索图的适配价值——我们已用三平铺打底，边际收益小（+3~8%）。**域知识**：切平面表示在 FoV ≥ 90° 时自身失真（0.534→0.449 消融）——大目标需回退球面片段。",
+      "pros": ["答辩锚点：证明我们是公开文献事实 SOTA", "tangent crop 搜索图思路（+12.9%）可借鉴"],
+      "cons": ["公开结果被我们反超", "官方框架集成路径与三平铺不同"],
+      "why_works": "**为什么 tangent crop 在 360VOT 官方框架里有效（+12.9%）**（结构归因）：切平面（tangent/gnomonic）投影把球面局部区域展开为无畸变平面图——目标在切平面内保持透视相机下的形状（正对目标时），与跟踪器预训练分布（透视数据）一致，模型无需适应 ERP 畸变。这正是『三平铺 vs tangent crop』的路线对照：三平铺用『3 倍输入 + 平移不变』解决接缝，tangent crop 用『几何投影 + 无畸变』解决畸变——两条路都有效，但**各自解决的是不同问题**（接缝分裂 vs 投影畸变）。**为什么 AiATrack 本身被我们反超（0.534 vs 0.5792）**：AiATrack 的 target-aware attention 在透视域是强方法，但 360VOT 官方框架的适配（tangent crop + BFoV 协议）固定了搜索范式；我们三平铺 + ODTrack dense memory 的组合在 360 域取得了更大的适配收益。**为什么切平面在 FoV≥90° 失效（0.534→0.449）**：gnomonic 投影在大视角下边缘拉伸剧烈（tan 发散），切图畸变超过模型容忍度——大目标（近距/大 FoV）需回退球面片段或分块，这是全景适配的通用边界条件，对三平铺同样成立。",
+      "scenarios": "答辩叙事：『本地 0.5792 超公开 SOTA（AiATrack-360 0.534）约 +8.4%』。",
+      "files": ["docs/TECH_RESEARCH_ZH_2026-08-21.md"],
+      "decision": "仅作对照与答辩素材。",
+      "graph_node": "docs_tech_research_zh_2026_08_21"
+    },
+    {
+      "id": "lorat360_official_ft",
+      "name": "LoRAT-360 官方微调（文献证据）",
+      "category": "调研对照 · 文献证据",
+      "status": "调研（他人实验）",
+      "period": "调研 2026-08-21",
+      "summary": "文献中唯一做过 360 微调的方法：LoRAT 接入 360VOT 官方框架微调后 0.461→0.495（+7% 相对），仍低于我们的 0.5792。证明『ERP 三平铺适配收益 > backbone 差距』。",
+      "metrics": [
+        {"name": "S_dual AUC", "value": "0.495", "scope": "360 微调后"},
+        {"name": "相对提升", "value": "+7%", "scope": "0.461 → 0.495"}
+      ],
+      "architecture": "LoRAT + 360VOT 官方框架 + 360 域微调。",
+      "tech_details": "**LoRAT-360 官方集成（文献实证，非本队实验）**：LoRAT 在 360VOT 官方评测框架（tangent crop / BFoV 协议）下接入，并进行 360 域微调。**数据**：未微调 0.461 → 360 域微调后 **0.495（+7% 相对提升）**——这是公开文献中唯一做过的全景域微调实验。**关键结论（本队决策依据）**：①+7% 相对 ≈ 我们『官方数据微调 ODTrack』的预期增益上界参考（调研估计 +5~10%）；②0.495 仍低于我们 0.5792 达 8.4 个点——证明**『ERP 三平铺适配的收益大于 backbone 本身差距』**：我们换装更强 backbone（SPMTrack/LoRAT）若不重训/重适配，收益有限；③微调预算应投向已接入方案（ODTrack/SUTrack）而非重新适配新模型。**方法论**：该实验同时验证了『三平铺 vs tangent crop』的对比价值与『360 微调必要性』。",
+      "pros": ["支持『微调 + 7% 相对』的增量估计", "验证三平铺适配路线优于单纯换模型"],
+      "cons": ["仍低于我们 0.5792（8.4 个点）"],
+      "why_works": "**为什么 360 微调带来 +7% 相对（0.461→0.495）**（结构归因）：LoRAT 的 LoRA 冻结 backbone、只训低秩增量——360 微调时 backbone 的通用特征不被破坏，仅适配 360 域统计（ERP 畸变、全景目标分布、BFoV 协议）；对比全量微调（会灾难性遗忘），LoRA 的『参数隔离』使域适配更安全高效，这是 +7% 且不掉通用能力的机理。**为什么微调后仍低于我们 0.5792**：①**适配机制差距**——官方框架的 tangent crop 在 4K 全景小目标 + 大 FoV 下失真的场景（我们三平铺 + 384 输入更稳）；②**记忆机制**——LoRAT 无 dense temporal memory（我们 ODTrack 的 1000-token 跨帧记忆），长时序列劣势；③**评测口径**——官方框架 0.495 与我们的 120 序列口径不完全一致，但量级对比仍有效。**为什么它是决策证据而非竞品**：①+7% 相对给了我们『官方数据微调 ODTrack』的增益上界参考（调研估计 +5~10%）；②它证明**『适配收益 > backbone 差距』**——换更强 backbone 不是杠杆，微调预算应投向已接入方案（ODTrack/SUTrack）。",
+      "scenarios": "答辩/决策证据：换更强 backbone 不是当前杠杆；微调预算投给已接入方案。",
+      "files": ["docs/TECH_RESEARCH_ZH_2026-08-21.md"],
+      "decision": "仅作证据引用。",
+      "graph_node": "docs_tech_research_zh_2026_08_21"
+    },
+    {
+      "id": "panosam2_omnitrack",
+      "name": "PanoSAM2 / OmniTrack++（方向借鉴）",
+      "category": "调研借鉴 · 未开源",
+      "status": "调研（方向引用）",
+      "period": "调研 2026-08-21",
+      "summary": "PanoSAM2（arXiv 2604.07901，未开源）：环绕 padding 解码器（接缝连续感受野）+ 畸变加权损失 + 长期 object pointer，360VOTS +5.6。OmniTrack++（arXiv 2511.00510）：置信度驱动『端到端跟踪 ↔ 检测全局模式』状态机。",
+      "metrics": [
+        {"name": "PanoSAM2", "value": "360VOTS +5.6", "scope": "J&F，未开源"},
+        {"name": "OmniTrack++", "value": "状态机模式切换", "scope": "可对照借鉴"}
+      ],
+      "architecture": "环绕 padding（几十行手写进 patch embedding）+ 畸变加权损失（用于微调）+ 长期 object pointer 记忆；状态机『跟踪↔检测』切换。",
+      "tech_details": "**PanoSAM2（arXiv 2604.07901，未开源）**：面向全景的 SAM2 适配，三大技术点：①**环绕 padding 解码器（circular padding decoder）**——在 patch embedding / attention 阶段对 ERP 接缝做循环 padding，使接缝两侧获得连续感受野（我们可几十行手写进 ODTrack 的 patch embedding，与三平铺互补）；②**畸变加权损失（distortion-weighted loss）**——按 ERP 纬度畸变权重（cos(lat) 面积比）重新加权损失，抑制极区过采样（可并入官方数据微调的损失）；③**长期 object pointer 记忆**——跨长时段的显式目标指针，缓解 SAM 短期记忆漂移。360VOTS 上 +5.6（J&F）。**OmniTrack++（arXiv 2511.00510）**：置信度驱动的『端到端跟踪 ↔ 检测全局模式』状态机——低置信切全局检测模式、恢复后切回端到端跟踪；其模式切换逻辑与我们 adaptive_spherical 的 NORMAL/LOST/VERIFY 同构，可作为状态机调参的对照参考。**引用纪律**：两文均未开源、数字为论文口径，答辩引用需注明『调研转述』。",
+      "pros": ["环绕 padding 零成本可落地（低工程量）", "畸变加权损失可并入微调", "状态机设计与 adaptive_spherical 同构可对照"],
+      "cons": ["均未开源，仅方向借鉴", "PanoSAM2 数字为论文口径需核实"],
+      "why_works": "**为什么环绕 padding 对全景跟踪有效**（结构归因）：ERP 接缝两侧在物理上是连续场景（经度 0° 与 360° 相邻），但标准 CNN/transformer 的 padding 把接缝当不相关边界——patch embedding 在接缝处截断感受野，目标跨界时特征被『切开』。环绕 padding（circular）把接缝两侧的像素循环拼接，使接缝处感受野连续，模型能看到『完整的跨界目标』——这与我们三平铺解决同一问题，但**粒度更细**（在特征层解决 vs 输入层解决），且不增加 3 倍输入开销（可叠加在三平铺上）。**为什么畸变加权损失有效**：ERP 的纬度畸变使极区像素面积被拉伸（cos(lat) 面积比），标准损失在极区过采样、赤道欠采样；按 cos(lat) 反权重可让模型公平学习各纬度——小目标/极区序列的增益来源。**为什么 OmniTrack++ 状态机与我们同构**：置信度驱动的『跟踪↔检测』模式切换 = 我们的 NORMAL/LOST/VERIFY 四态；文献独立得出相同结论（低置信切全局模式），为 adaptive_spherical 的架构合理性提供外部背书。**引用纪律**：两文未开源，数字（+5.6 J&F）为论文口径，答辩引用注明『调研转述』。",
+      "scenarios": "技术路线借鉴：环绕 padding 可手写进 ODTrack patch embedding；状态机可对照 adaptive_spherical。",
+      "files": ["docs/TECH_RESEARCH_ZH_2026-08-21.md"],
+      "decision": "低风险项（环绕 padding）可并入微调/评测管线；状态机思想已体现在 adaptive_spherical。",
+      "graph_node": "docs_tech_research_zh_2026_08_21"
+    },
+    {
+      "id": "deploy_accel",
+      "name": "RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）",
+      "category": "工程加速 · 部署优化",
+      "status": "调研（部分落地 cu128 镜像）",
+      "period": "调研 2026-08-21 ~",
+      "summary": "瓶颈定量归因：8.99 FPS 中每帧 ~111ms 约 70ms 在 4K CPU 软解 + 三平铺整图拷贝 + CPU 裁剪。NVDEC 硬解 + GPU 预处理 + BF16 + torch.compile 预计 60-80+ FPS（零/近零精度损失）。",
+      "metrics": [
+        {"name": "现状", "value": "8.99 FPS", "scope": "3090 端到端"},
+        {"name": "纯推理", "value": "32 FPS@2080Ti", "scope": "ODTrack-B"},
+        {"name": "预测", "value": "60-80+ FPS", "scope": "5090 + 全加速项"}
+      ],
+      "architecture": "①NVDEC 硬解 + 三级流水线（去 40-60ms）②三平铺→单帧直取 crop + 环绕 pad + GPU grid_sample（省 10-15ms）③BF16/FP16 autocast（1.5-2×）④torch.compile（+20-40%）⑤可选 TRT FP16（3-4×，需 sm_120 实测）。",
+      "tech_details": "**瓶颈定量归因**（调研核心结论）：ODTrack 端到端 8.99 FPS 中每帧 ~111ms 的构成：4K H.264 CPU 软解 40-60ms + 三平铺整图拷贝 66MB 5-15ms + CPU 裁剪 resize 10-30ms——**~70% 开销不在模型**（ODTrack-B 纯推理 32 FPS@2080Ti）。**加速清单技术细节**：①**NVDEC 硬解**（PyNvVideoCodec）+ 解码/预处理/推理三级流水线：9→30+ FPS，零精度损失；②**三平铺 → 单帧直取 crop**：仅目标跨缝时用 `F.pad(mode='circular')` 或双窄条拼接做水平环绕，裁剪/resize 全上 GPU（`F.grid_sample`），数据搬运降 1-2 个量级；③**BF16/FP16 autocast**：推理 1.5-2×，训练本就是 AMP 故精度损失 <0.3 AUC；④**torch.compile（max-autotune）**：只编译纯 tensor 子图，Inductor 缓存预热进镜像，+20-40%；⑤**TRT FP16**（torch-tensorrt 2.7.0+cu128，必须锁 `tensorrt>=10.8`，10.7 不识别 5090 sm_120）：3-4×，OSTrack 实测 240 vs 70 FPS 参照，但 sm_120 有个例异常报告须实测 + eager fallback。**叠加预测**：5090 现状代码 15-20 FPS → +硬解 25-35 → +GPU 预处理 45-60 → +BF16/compile 60-80+ FPS。**明确不建议**：INT8/FP8（ViT PTQ 掉点 >1%）、降分辨率/ViT-S（掉 2 点起）、DALI/decord（sm_120 无官方 wheel）。",
+      "pros": ["前三项零精度损失", "幅度大（9→30→60+ FPS）", "TRT 有 OSTrack 实测 240 vs 70 参照"],
+      "cons": ["NVDEC/TRT wheel 需预打包进断网镜像", "TRT engine 需 5090 同款卡构建预热", "sm_120 有个例异常需 eager fallback", "不建议 INT8/FP8（ViT PTQ 掉点 >1%）"],
+      "why_works": "**为什么瓶颈在解码/预处理而非模型**（定量归因）：8.99 FPS 的 111ms/帧中，模型纯推理仅占 ~31ms（32 FPS@2080Ti 口径折算），剩余 ~70ms 在 4K H.264 CPU 软解（40-60ms）+ 三平铺整图拷贝 66MB（5-15ms）+ CPU 裁剪 resize（10-30ms）——即 ~70% 时间不在 GPU 计算而在数据搬运/解码。**为什么 NVDEC 硬解收益最大**：GPU 内置 NVDEC 引擎解码 4K H.264 的吞吐是 CPU 软解的 5-10 倍且零 CPU 占用，配合三级流水线（解码/预处理/推理并行）把解码延迟从关键路径移除——这是 9→30+ FPS 的结构性来源（并行化而非提速）。**为什么三平铺→单帧直取 crop 有效**：三平铺的 3× 整图拷贝是纯浪费（只有目标附近被模型使用）；改为单帧直取 crop + 仅跨缝时 circular pad，数据搬运降 1-2 个量级。**为什么 BF16/compile 精度无损**：训练本就是 AMP（模型已对低精度鲁棒），BF16 只降中间精度不降表示容量；torch.compile 只编译纯 tensor 子图（无 Python 开销的算子融合）。**为什么不做 INT8**：ViT 的 PTQ 掉点 >1%（回归任务对量化更敏感），且 sm_120 的 TRT 支持有个例异常——收益/风险比不支持。**叠加逻辑**：每项独立 A/B，掉点 >0.005 即回退（团队纪律）。",
+      "scenarios": "提交/演示帧率不足时按序落地；每项独立 A/B 回归（团队纪律）。",
+      "files": ["docs/TECH_RESEARCH_ZH_2026-08-21.md", "docker/odtrack/build_odtrack_cu128.sh"],
+      "decision": "调研结论：速度瓶颈在解码/预处理而非模型；cu128 镜像已就绪，加速项按性价比序落地。",
+      "graph_node": "docs_tech_research_zh_2026_08_21"
+    }
+  ]
+}

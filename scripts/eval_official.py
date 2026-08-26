@@ -264,11 +264,12 @@ def build_sutrack_tracker(args):
             import torch
 
             tiled = _np.concatenate((frame_rgb, frame_rgb, frame_rgb), axis=1)
-            if args.sutrack_amp and torch.cuda.is_available() and not args.force_cpu:
-                with torch.autocast(device_type="cuda", dtype=torch.float16):
+            with torch.no_grad():
+                if args.sutrack_amp and torch.cuda.is_available() and not args.force_cpu:
+                    with torch.autocast(device_type="cuda", dtype=torch.float16):
+                        out = self.tracker.track(tiled)
+                else:
                     out = self.tracker.track(tiled)
-            else:
-                out = self.tracker.track(tiled)
             box = out.get("target_bbox")
             if box is None or len(box) != 4:
                 raise RuntimeError("SUTrack returned invalid target_bbox")
@@ -551,8 +552,20 @@ def build_odtrack_tracker(args):
             self.patch_size = int(args.tangent_patch_size)
             self.view = None
             self.map_x = self.map_y = None
+            self.grid = None  # GPU 重采样 grid（(1,P,P,2) 归一化坐标），None 则走 numpy 回退
 
         def _patch(self, frame_rgb):
+            if self.grid is not None:
+                import numpy as _np
+                import torch
+                from torch.nn import functional as _F
+                dev = self.grid.device
+                t = torch.from_numpy(_np.ascontiguousarray(frame_rgb)).permute(2, 0, 1).float()
+                tiled = torch.cat([t, t, t], dim=2).unsqueeze(0).to(dev, non_blocking=True)
+                out = _F.grid_sample(tiled, self.grid, mode="bilinear",
+                                     padding_mode="border", align_corners=True)
+                patch = out[0].permute(1, 2, 0).detach().cpu().numpy()
+                return _np.clip(_np.rint(patch), 0, 255).astype(_np.uint8)
             from panotrack.geometry.projection import remap_image
             return remap_image(frame_rgb, self.map_x, self.map_y)
 
@@ -571,6 +584,19 @@ def build_odtrack_tracker(args):
             self.view = BFoV(target.lon, target.lat, fov_h, fov_v)
             self.map_x, self.map_y = tangent_remap(
                 self.view, self.patch_size, self.patch_size, self.width, self.height)
+            self.grid = None
+            if not args.force_cpu:
+                import torch
+                if torch.cuda.is_available():
+                    # 与 numpy remap_image 语义对齐：三平铺输入(3W) + 源坐标平移 +W，
+                    # align_corners=True（-1↔像素0中心，+1↔像素W-1中心），
+                    # border 垂直 clamp 对应 numpy 的 y clamp；x 邻域始终落在 3W 张量内无需回绕。
+                    gx = torch.from_numpy(self.map_x.astype(_np.float32))
+                    gy = torch.from_numpy(self.map_y.astype(_np.float32))
+                    tw = 3 * self.width
+                    gx = (gx + self.width) / (tw - 1.0) * 2.0 - 1.0
+                    gy = gy / (self.height - 1.0) * 2.0 - 1.0
+                    self.grid = torch.stack([gx, gy], dim=-1).unsqueeze(0).cuda()
             patch = self._patch(frame_rgb)
             local = _erp_bbox_to_local(
                 erp_box, self.view, self.patch_size, self.patch_size,
@@ -948,8 +974,10 @@ def main(argv=None):
     ap.add_argument("--sutrack-workspace", default="/opt/sutrack")
     ap.add_argument("--sutrack-ckpt", default="/opt/models/SUTRACK_ep0300.pth.tar")
     ap.add_argument("--sutrack-config", default="sutrack_b224")
-    ap.add_argument("--sutrack-amp", action="store_true",
-                    help="use CUDA FP16 autocast for SUTrack inference speed A/B")
+    ap.add_argument("--sutrack-amp", action="store_true", default=True,
+                    help="use CUDA FP16 autocast for SUTrack inference (default: on)")
+    ap.add_argument("--no-sutrack-amp", dest="sutrack_amp", action="store_false",
+                    help="disable CUDA FP16 autocast for SUTrack")
     # LoRAT 专用
     ap.add_argument("--lorat-workspace", default="/opt/lorat")
     ap.add_argument("--lorat-ckpt", default="/opt/models/lorat_base.bin")

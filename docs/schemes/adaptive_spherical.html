@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>adaptive_spherical（自适应球面状态机） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="active" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge amber">开发中（v1 未过 micro gate，v2 排队）</span>
+    <span class="badge">自适应系统 · Phase 2 创新</span>
+    <span class="badge blue">⏱ Phase 2（2026-08-26 ~）</span>
+  </div>
+  <h1>adaptive_spherical（自适应球面状态机）</h1>
+  <div class="summary">Phase 2 的核心自研：NORMAL/SUSPECT/LOST/VERIFY 四态状态机 + 球面运动证据 + anchor 校验 + 稀疏专家 token 预算 + 延迟自适应调用 + 状态化专家片段。首个 micro gate（seq_0046 前 80 帧）复现 T224 结果但多付 20% B224 探测开销，v1 未晋升。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">AUC</div><div class="m-value">0.3623</div><div class="m-scope">micro gate seq_0046 前 80 帧（=SUTRACK-T224）</div></div>
+<div class="metric"><div class="m-name">SR</div><div class="m-value">0.5570</div><div class="m-scope">同上</div></div>
+<div class="metric"><div class="m-name">E2E FPS</div><div class="m-value">21.8</div><div class="m-scope">v1（T224 纯跑 35.7）</div></div>
+<div class="metric"><div class="m-name">专家 P95</div><div class="m-value">58ms vs 主干 28ms</div><div class="m-scope">trace 实测</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">NORMAL（主干快跟踪）→ 球面运动证据触发 SUSPECT → 连续低置信 LOST → 稀疏专家（B224 等）按状态片段调用（非孤立探测）→ VERIFY（anchor 相似 + 运动合理 + 分数门槛）→ 恢复或保持 LOST。专家预算由实测 33.3ms 帧目标计算，延迟自适应调节调用率。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**四态状态机**（AdaptiveSphericalTracker，`AdaptiveStatus`）：NORMAL → SUSPECT（quality &lt; suspect_quality 或运动异常/anchor 相似度低，连续 suspect_run 帧）→ LOST（quality &lt; lost_quality 连续 lost_run 帧）→ VERIFY（专家候选通过 _verify_candidate）→ NORMAL（连续 verify_frames 帧 quality ≥ recover_quality）。**证据函数**（_evidence）：融合主跟踪器 quality、响应熵、anchor 相似度（_anchor_similarity）、球面运动一致性（_angular_distance + SphericalState 更新）、尺度变化，产出 policy_score 驱动 LinearRiskPolicy。**专家预算**（ExpertBudget）：由实测帧目标 33.3ms（30 FPS）与主/专家延迟 EMA（_update_latency_budget，latency_ema_alpha 平滑）计算 call_fraction 与专家 token 预算——保证专家调用不突破实时预算。**状态化专家片段**（expert_episode_remaining）：专家一旦被接受就连续运行 expert_episode_frames 帧（短状态片段），而非每帧孤立探测——避免每次重置慢专家的初始化开销（v1 教训：孤立探测导致 20% 额外 B224 开销却只复现 T224 结果）。**恢复判据**：expert_better（专家 quality ≥ 主 × 系数）或 recovery_vote（主 quality &lt; lost_quality 且专家 ≥ expert_quality），且两路框 agreement &lt; disagreement_iou 才切换。**trace 输出**：逐帧 trace.jsonl（route_reasons/expert_used/latency_ms/各子延迟），latency.json 汇总。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么这是通往 0.8 的最现实路线**（结构性论证）：简单融合只做『结果级组合』（0.52），而 adaptive 在**系统级**引入三个文献级缺口的解法——①**判丢**：球面运动证据（_angular_distance + SphericalState）是全景域特有的强判丢信号（目标在球面上运动有几何一致性，异常即可疑），比 recapture 的 NCC 代理信号更本质；②**找回**：状态化专家片段（episode）避免『每次探测都重置慢专家』——v1 失败（孤立探测多付 20% 开销）证明『如何调用专家』与『选哪个专家』同等重要；③**预算**：ExpertBudget 用实测帧目标（33.3ms）+ 延迟 EMA 动态调专家调用率，把『自适应』从启发式变成闭环控制。**为什么 v1 micro gate 未过（复现 T224 却多付 20% 探测）**：B224 专家与 T224 主干精度差仅 3 点（0.4919 vs 0.4614），在 80 帧窗口内专家几乎没有机会展示优势，而每次探测都付 B224 的初始化延迟——**专家选择空间不足**是 v1 失效的机理（要换更分化的专家如 lorat/SAM2，或只在 LOST 后调用）。**为什么 trace 是它的杀手锏**：trace.jsonl 把每帧的路由原因/子延迟落盘，使『调参』变成『数据驱动的归因』（主干 P95 28ms vs 专家 58ms 是 v2 设计的直接依据）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>四态状态机 + 球面运动证据 = 全景域正确的自研方向</li>
+<li>状态化专家片段（episode）优于孤立探测（避免每次重置慢专家）</li>
+<li>trace.jsonl / latency 输出使瓶颈可测量（主干 P95 28ms）</li>
+<li>sparse expert token 预算有实测帧目标支撑</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>v1 复现 T224 结果却多付 20% 探测开销——路由收益未兑现</li>
+<li>micro gate 样本太小（80 帧 1 序列），不代表全量</li>
+<li>专家选择（B224）与主干（T224）差距仅 3 个点，路由收益空间有限</li>
+<li>全序列 episode 验证仍在排队</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">通往 0.8 目标的最现实技术路线（架构级增量而非组合已知方法）；需全序列验证 + 更优专家组合（lorat 真实场景专家等）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>panotrack/pipeline/adaptive_spherical.py</div>
+<div class="file-item"><span class="tag">📄</span>panotrack/pipeline/risk_policy.py</div>
+<div class="file-item"><span class="tag">📄</span>scripts/eval_official.py</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>v2（stateful episode）已实现并排队全序列 gate；是当前唯一有架构级增量的方向。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

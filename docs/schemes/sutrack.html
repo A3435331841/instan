@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SUTrack（B224 / T224） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="active" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge green">核心候选（精度/快路径双线）</span>
+    <span class="badge">通用 SOT · 自回归</span>
+    <span class="badge blue">⏱ 决赛冲刺（2026-08-24 ~）</span>
+  </div>
+  <h1>SUTrack（B224 / T224）</h1>
+  <div class="summary">SUTrack（自回归单目标跟踪器，AAAI 2025）B224/T224 双尺寸接入。**B224 官方 all130 首超 ODTrack 基线（AUC 0.6113 vs 0.5882）**，成为当前最强单模型；T224 是快路径核心（39 FPS）。与 ODTrack 清晰互补（36 修复 vs 16 退步序列）。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">B224 AUC</div><div class="m-value">0.6113</div><div class="m-scope">官方 all130（首超 ODTrack 基线 0.5882）</div></div>
+<div class="metric"><div class="m-name">B224 SR</div><div class="m-value">0.7223</div><div class="m-scope">官方 all130</div></div>
+<div class="metric"><div class="m-name">T224 AUC</div><div class="m-value">0.5598</div><div class="m-scope">官方 all130</div></div>
+<div class="metric"><div class="m-name">FPS</div><div class="m-value">28.9 / 39.0</div><div class="m-scope">B224 / T224 all130</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">SUTrack-B/L 骨干（HF 权重，xche32/SUTrack），自回归时序输出；ERP 适配采用三平铺风格输入，valid35 bake-off 胜出后扩至 all130。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**SUTrack（AAAI 2025）**：自回归（autoregressive）单目标跟踪器，与 ODTrack 同属『以历史目标状态预测下一帧』范式。LaSOT 75.2（L384），GOT-10k 81.5，权重经 HuggingFace（xche32/SUTrack）分发——断网镜像打包最方便。**本队接入**：B224 与 T224 两个尺寸变体，模板/搜索尺寸与输入分辨率成比例缩放（B=base 224、T=tiny 224）；ERP 适配沿用三平铺输入（目标跨经度边界时保证搜索图内无接缝），通过 eval_official.py 的 sutrack 后端 + `--sutrack-workspace`/`--sutrack-config`/`--sutrack-ckpt` 参数驱动。**bake-off 流程**：GPU1 valid35 先行（~10 分钟/候选），B224/T224 锁后扩至 all130；E2E FPS 高于 30 的候选进入全量比较。**medium 实证**：B224 AUC 0.4919（real 0.4435 / sim 0.5551）、FPS 26.0；T224 AUC 0.4614（real 0.4783 / sim 0.4393）、FPS 39.5。B224 的 sim 域明显强于 real 域（0.555 vs 0.443），T224 相反（real 0.478 &gt; sim 0.439）——尺寸/容量对不同场景域的影响不对称。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么 B224 是 medium 精度最稳**（结构归因）：B（base）变体 224 输入在容量与分辨率间取得平衡——比 T（tiny）有更强的特征容量（自回归时序建模更充分），比 384 输入（L 变体）推理更稳（目标占比更高、无过度下采样）。其自回归范式（用前序目标状态预测下一帧）与 ODTrack 同源，跨帧外观积累使其在长时序列上优于单帧匹配器。**为什么 B224 sim 强于 real（0.555 vs 0.443）、T224 相反（real 0.478 &gt; sim 0.439）**：容量-速度权衡的交互——B224 的强容量在 sim 域（目标外观更规则、运动更极端）能充分建模『大运动+外观保持』；T224 的轻量结构在 real 域（光照变化、形变）反而因『不过拟合仿真统计』而更稳健。**为什么 T224 达到 39.5 FPS**：tiny 骨干 + 224 搜索图，计算量约为 384 输入的 1/3，且无三平铺 3 倍拷贝（ERP 采样时环绕）。**为什么两者都低于 ODTrack 0.5882**：无 dense temporal memory（自回归但记忆深度不如 ODTrack 的 MEMORY_THRESHOLD=1000 token 序列）——这是 0.49 vs 0.58 差距的主因。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>B224 medium 精度第一（0.4919），real/sim 均衡（0.4435/0.5551）</li>
+<li>T224 39.5 FPS 且 rep AUC 0.5632——速度-精度平衡最佳</li>
+<li>自回归范式与 ODTrack 同源，适配成本低</li>
+<li>HuggingFace 权重断网打包最方便</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>B224 FPS 26 未达 30 阈值（需 solo 复测 + 优化）</li>
+<li>sim/hard 序列弱（seq_0046 0.077, seq_0011 0.264）</li>
+<li>medium 整体仍低于 ODTrack 官方基线 0.5882</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">融合中的精度核心（B224）+ 快路径主干（T224）；最可能的『提交主干』候选组合。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>scripts/remote/grt360_phase2_gpu1_queue.sh</div>
+<div class="file-item"><span class="tag">📄</span>integrations/sutrack/</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>保留为核心：B224 精度线 + T224 速度线，Phase 2 GPU1 bake-off 已推进至 all130。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SPMTrack（CVPR 2025，LaSOT 最高可复现） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="active" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge purple">调研（未接入）</span>
+    <span class="badge">调研候选 · 未实跑</span>
+    <span class="badge blue">⏱ 调研 2026-08-21</span>
+  </div>
+  <h1>SPMTrack（CVPR 2025，LaSOT 最高可复现）</h1>
+  <div class="summary">CVPR 2025 通用 SOT，LaSOT AUC 77.4/76.8/74.9（G/L/B），公开可复现最高。LoRAT 码基同源，接入成本预估可控，但 360 域直接证据缺失，优先级低于三平铺适配收益。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">LaSOT AUC</div><div class="m-value">77.4 / 76.8 / 74.9</div><div class="m-scope">G / L / B 变体</div></div>
+<div class="metric"><div class="m-name">速度</div><div class="m-value">未公布</div><div class="m-scope">L 级别</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">与 LoRAT 同码系（trackit 框架），CVPR 2025 冠军方法。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**SPMTrack（CVPR 2025，Sparsely Modulated Transformer Trackers）**：LaSOT AUC 77.4（G）/ 76.8（L）/ 74.9（B），为公开可复现最高。核心创新：在 transformer 跟踪器中引入**稀疏调制（sparse modulation）**机制——用可学习的稀疏门控选择性调制特征通道/token，在保持全局建模能力的同时降低冗余计算，缓解『模板污染』问题（模板特征随时间被遮挡/形变干扰）。**与 LoRAT 的关系**：同属 trackit 码系（LoRAT 团队延续工作），接入成本与 LoRAT 近似（纯 PyTorch 2.x、无 mmcv）。**360 域接入预期**：需 ERP 三平铺适配 + 360 域微调才能发挥（文献证据：LoRAT 接入 360VOT 官方框架微调后仅 0.495，未微调 0.461——适配收益 &gt; backbone 差距）。**权重分发**：GDrive（B 变体待审批），断网打包不便。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么 LaSOT 最高（77.4）**（结构归因）：SPMTrack 的**稀疏调制（sparse modulation）**在 transformer 跟踪器上做两件事——①用可学习稀疏门控选择性调制特征通道/token，保留对目标判别最有效的子集，抑制背景/相似物响应（缓解模板污染）；②稀疏化同时降低计算冗余，使更大 backbone 可部署。LaSOT 的 2800+ 长时序列正好暴露『模板污染』问题（长时外观渐变 + 相似物干扰），稀疏调制直击该失效模式，故领先 4-5 个点。**为什么 360 域不能直接平移**（关键机理）：LaSOT 是透视相机、目标占比稳定；360VOT 是 ERP 全景，目标占比随纬度畸变剧烈变化（极区拉伸）、跨界频繁——文献证据（LoRAT-360 微调后仅 0.495）证明：**适配机制（三平铺/切图）的收益 &gt; backbone 能力差距**。SPMTrack 若不重做 ERP 适配 + 360 微调，其 77.4 的 LaSOT 优势在 360 域会大幅缩水。**为什么优先级低于已接入方案**：O(n) 适配 + 微调成本 vs 边际收益（我们 0.5792 已是 360VOT 事实 SOTA），除非精度上限成为瓶颈。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>LaSOT 最高可复现</li>
+<li>与 LoRAT 码基同源，接入工程量小</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>360 域无直接证据</li>
+<li>权重 GDrive（B 待审批），断网打包麻烦</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">若决赛后继续研究：换装『更准』路线的正解之一，需 ERP 三平铺适配 + 360 微调。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>docs/TECH_RESEARCH_ZH_2026-08-21.md</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>调研结论：优先级低于已接入方案的三平铺适配；仅当精度上限成为瓶颈时启动。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

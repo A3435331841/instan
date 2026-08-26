@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ODTrack ERP 三平铺（初赛提交 · 精度冠军） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="active" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge green">已提交（初赛成绩冻结）</span>
+    <span class="badge">全景适配 · 三平铺</span>
+    <span class="badge blue">⏱ Stage 3（2026-08-09 ~ 08-14）</span>
+  </div>
+  <h1>ODTrack ERP 三平铺（初赛提交 · 精度冠军）</h1>
+  <div class="summary">把 ODTrack（自回归密集时序跟踪器）适配到 ERP 全景：目标区域三平铺展开送入模型，成为 120 序列赛马冠军并作为初赛提交镜像。公开文献事实 SOTA（超 AiATrack-360 0.534 约 +8.4%）。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">AUC</div><div class="m-value">0.5792</div><div class="m-scope">360VOT 120 序列全量</div></div>
+<div class="metric"><div class="m-name">SR</div><div class="m-value">0.6532</div><div class="m-scope">360VOT 120 序列全量</div></div>
+<div class="metric"><div class="m-name">FPS</div><div class="m-value">8.99</div><div class="m-scope">4K 端到端（3090）</div></div>
+<div class="metric"><div class="m-name">AUC</div><div class="m-value">0.5882</div><div class="m-scope">官方 130 序列基线（1440×720, 29.9 FPS）</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">BFoV init → ERP 目标区域三平铺（中央 + 左右环绕）→ ODTrack 逐帧推理（dense temporal token 记忆）→ BFoV 输出。适配层 `integrations/odtrack/`，上游代码零改动。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**ODTrack（AAAI 2024）**：自回归（autoregressive）单目标跟踪器。核心创新是把跟踪建模为**多目标联合生成任务**——离线训练时随机从序列中采样 N 个目标帧（含模板帧）组成 batch 并行预测，使模型学会『用前序目标状态预测下一帧』的自回归模式；在线推理时持续用预测结果扩充 token 序列。backbone 为 ViT-B/16（384 输入），dense temporal token 记忆（MEMORY_THRESHOLD=1000）跨帧累积外观。**ERP 三平铺适配（本项目核心工程）**：`np.concatenate((frame, frame, frame), axis=1)` 将 ERP 帧水平复制 3 份（3W 宽）；首帧框 `_tile_box(box, width) = [x % W + W, y, w, h]` 移到**中间副本**——保证目标无论跨不跨经度边界，中央副本内都是无接缝的完整目标；逐帧推理后预测框 `pred[0] %= W` 折回原始宽度。**适配收益**：三平铺把『跨界目标在搜索图内分裂』问题转化为『平移不变』问题，模型无需感知 ERP 接缝。**评测**：OPE 协议，首帧 GT 初始化，`ope_evaluate`（21 点 AUC + dual IoU 双口径）。**配置**：TEMPLATE_FACTOR/SIZE、SEARCH_FACTOR/SIZE 来自 baseline.yaml。上游 py3.8 时代代码经 `_install_compat` 打补丁（torch._six/visdom 桩）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么三平铺是 ERP 全景的正确适配**（结构因果）：ERP 的经度接缝（x=0/W 处）会把跨界目标切成两半，任何局部搜索图都会看到『半目标』。三平铺把帧复制 3 份、目标框移到中间副本后，无论目标真实经度在哪，中间副本内的目标都是完整无接缝的——把『接缝问题』转化为『平移问题』，模型完全无需感知 ERP 边界。配合预测框 x%W 折回，输入输出都是标准单目跟踪语义。**为什么 dense temporal memory 是关键精度来源**：ODTrack 的自回归训练使其学会用前序目标状态（含 dense token 序列，MEMORY_THRESHOLD=1000）预测下一帧——长时序列中外观渐变时，记忆持续提供『目标长什么样』的锚定，这是 LightFC（单帧匹配）0.31 与 ODTrack 0.58 差距 27 个点的结构性原因。**为什么官方 130 基线更高（0.5882 vs 0.5792）**：官方数据 1440×720 分辨率低于 360VOT 测试的 4K，目标占比更大、解码更快（29.9 vs 8.99 FPS），且与隐藏测试集同分布——同一方案在目标更清晰时精度自然提升。**局限机理**：失锁后 dense memory 吸收错误外观形成正反馈（污染），无判丢机制导致一路错到底——这是 recapture/自适应状态机的设计动机。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>120 序列赛马冠军（0.5792 &gt; UETrack 0.5143 &gt; LightFC 0.3116）</li>
+<li>官方 130 序列基线 AUC 0.5882 / 29.9 FPS，验证方案稳健</li>
+<li>三平铺适配收益 &gt; backbone 差距：LoRAT 接入 360 微调后仍只有 0.495</li>
+<li>Docker 断网自包含交付（cu128 镜像，5090 Blackwell 兼容）</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>端到端仅 8.99 FPS（瓶颈在 4K 解码 + 整图拷贝 + CPU 裁剪，非模型）</li>
+<li>无判丢/重捕获：失锁后时序记忆被污染一路错到底（10 条失锁序列）</li>
+<li>dense temporal token 长时漂移正反馈</li>
+<li>三平铺输入形态与官方隐藏测试分布有 gap（已被官方 130 序列验证覆盖）</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">精度优先的提交方案；全帧域（360° 全景单目标跟踪）主干。适合作为融合中的精度教师与失锁研究的基座。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>integrations/odtrack/arena_protocol.py</div>
+<div class="file-item"><span class="tag">📄</span>integrations/odtrack/run_erp.py</div>
+<div class="file-item"><span class="tag">📄</span>configs/grt360_best_accuracy.json</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>初赛提交冻结（AUC 0.5792）。决赛与 Phase 2 均以其为精度锚点，微调/融合/自适应全部围绕它展开。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>融合族（fusion_2way ~ 8way） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="active" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge blue">已实测（增益有限）</span>
+    <span class="badge">多模型融合</span>
+    <span class="badge blue">⏱ 决赛冲刺（2026-08-24 ~）</span>
+  </div>
+  <h1>融合族（fusion_2way ~ 8way）</h1>
+  <div class="summary">对全部候选做组合融合（2/3/4/5/6/8-way，含 v1v4/ep7 变体）。30/30 最优 fusion_5way AUC 0.522，仅比单模型最好（sutrack_b224 0.4919）高 3 个点，远低于 oracle 上限 0.5779。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">fusion_5way AUC</div><div class="m-value">0.522</div><div class="m-scope">medium 30（最优）</div></div>
+<div class="metric"><div class="m-name">fusion_4way AUC</div><div class="m-value">0.522</div><div class="m-scope">medium 30</div></div>
+<div class="metric"><div class="m-name">fusion_3way AUC</div><div class="m-value">0.510</div><div class="m-scope">medium 30</div></div>
+<div class="metric"><div class="m-name">oracle 上限</div><div class="m-value">0.5779</div><div class="m-scope">medium 30 逐序列最优</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">多模型结果级融合（不同组合：精度专家 + 快路径 + 微调族），sequence_expert 路由（按序列 ID 选择最优方法）或加权投票。fusion_6way 系列引入 v4 微调族与 ep7。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**融合范式**：结果级（late fusion）——各 tracker 独立跑完全序列输出逐帧 bbox，融合层按策略选框，不共享中间特征。**两种路由策略**：①`sequence_expert`：按序列 ID 固定选择该序列在验证集上的最优方法（oracle 式，训练集泄漏风险——测试集序列 ID 未知，实际部署不可用）；②加权投票/均值：多模型 bbox 按置信度加权。**组合方式**（eval_fusion.py）：2way（sutrack_b224+lorat 类）、3way（精度+快路径+微调）、4way/5way（fusion_5way = 精度专家×2 + 快路径×2 + 微调）、6way（5way+v4 微调族）、8way（全组合）；v1v4/ep7 变体替换微调族来源。**关键实证**：fusion_5way AUC 0.522 &gt; 单模型最好 0.4919（+3.0 点），但 oracle 上限 0.5779（逐序列选最优）——简单融合只捕获了多样性收益的一小半；FPS 多为 nan（并发评测未 solo 复测）。**两组件 oracle 对**（component_diagnostics）：fusion_3way+fusion_6way_v4 0.552、fusion_6way_v4+lorat 0.551、lorat+sutrack_b224 0.547——含 lorat 的对精度最高，印证其专家价值。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么融合有效（+3 点）**（结构归因）：不同 tracker 的失效模式互补——ODTrack 系（dense memory）在长时稳定序列强、SUTrack（自回归）在 sim 域强、LoRAT（DINOv2）在 real 域强、UETrack（轻量）在简单帧快——结果级融合取『多数一致/高置信』时天然压制单一模型的系统性偏差（如 ODTrack 的失锁污染、LightFC 的外观漂移）。**为什么只到 0.522（距 oracle 0.5779 差 5.6 点）**：①**融合在错误方向上也融合**——加权投票无法识别『哪个模型此刻是对的』，只会平均；②**sequence_expert 的 oracle 上界**——按序列 ID 选最优是事后最优（含泄漏），真实部署没有序列 ID 先验，动态路由（置信度/状态）才能逼近；③**模型相关性**——同族变体（ft_ep6/7/8）高度相关，融合增益递减（fusion_8way 0.490 反而不如 5way 0.522）。**为什么含 lorat 的对精度最高（oracle 对 0.547-0.552）**：LoRAT 的 DINOv2 特征与其它模型（CNN/轻量 transformer）差异最大——多样性（模型异质性）是融合收益的来源，同构模型融合无增量。**部署意义**：融合的 +3 点是『零训练』的保底增益，但 0.8 目标需要动态路由（adaptive_spherical）而非静态组合。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>全部组合超过单模型最好（0.4919→0.522）</li>
+<li>简单投票/专家路由即可稳定 +3 个点</li>
+<li>『按序列选最优』的 oracle 验证了多样性的存在（0.5779）</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>融合增益天花板明显：0.522 离 0.5779 oracle 还有 5.6 个点</li>
+<li>sequence_expert 依赖序列 ID（训练集泄漏风险，测试集不可用）</li>
+<li>FPS 多为 nan/并发观测，速度未验证</li>
+<li>离提交目标 0.8 差距巨大——组合已知方法填不平</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">低风险增益项：融合作为提交方案的保底提升（+3 点）；但按序列 ID 路由不可用于隐藏测试集，必须换成置信度/状态驱动的动态路由。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>scripts/eval_fusion.py</div>
+<div class="file-item"><span class="tag">📄</span>panotrack/evaluation/failure_matrix.py</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>保留为基线增益；结论：简单融合不是通往 0.8 的路，需要自适应状态机（adaptive_spherical）或反事实路由（train_counterfactual_router）。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

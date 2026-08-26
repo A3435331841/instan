@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>LoRAT-360 官方微调（文献证据） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="active" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge purple">调研（他人实验）</span>
+    <span class="badge">调研对照 · 文献证据</span>
+    <span class="badge blue">⏱ 调研 2026-08-21</span>
+  </div>
+  <h1>LoRAT-360 官方微调（文献证据）</h1>
+  <div class="summary">文献中唯一做过 360 微调的方法：LoRAT 接入 360VOT 官方框架微调后 0.461→0.495（+7% 相对），仍低于我们的 0.5792。证明『ERP 三平铺适配收益 &gt; backbone 差距』。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">S_dual AUC</div><div class="m-value">0.495</div><div class="m-scope">360 微调后</div></div>
+<div class="metric"><div class="m-name">相对提升</div><div class="m-value">+7%</div><div class="m-scope">0.461 → 0.495</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">LoRAT + 360VOT 官方框架 + 360 域微调。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**LoRAT-360 官方集成（文献实证，非本队实验）**：LoRAT 在 360VOT 官方评测框架（tangent crop / BFoV 协议）下接入，并进行 360 域微调。**数据**：未微调 0.461 → 360 域微调后 **0.495（+7% 相对提升）**——这是公开文献中唯一做过的全景域微调实验。**关键结论（本队决策依据）**：①+7% 相对 ≈ 我们『官方数据微调 ODTrack』的预期增益上界参考（调研估计 +5~10%）；②0.495 仍低于我们 0.5792 达 8.4 个点——证明**『ERP 三平铺适配的收益大于 backbone 本身差距』**：我们换装更强 backbone（SPMTrack/LoRAT）若不重训/重适配，收益有限；③微调预算应投向已接入方案（ODTrack/SUTrack）而非重新适配新模型。**方法论**：该实验同时验证了『三平铺 vs tangent crop』的对比价值与『360 微调必要性』。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么 360 微调带来 +7% 相对（0.461→0.495）**（结构归因）：LoRAT 的 LoRA 冻结 backbone、只训低秩增量——360 微调时 backbone 的通用特征不被破坏，仅适配 360 域统计（ERP 畸变、全景目标分布、BFoV 协议）；对比全量微调（会灾难性遗忘），LoRA 的『参数隔离』使域适配更安全高效，这是 +7% 且不掉通用能力的机理。**为什么微调后仍低于我们 0.5792**：①**适配机制差距**——官方框架的 tangent crop 在 4K 全景小目标 + 大 FoV 下失真的场景（我们三平铺 + 384 输入更稳）；②**记忆机制**——LoRAT 无 dense temporal memory（我们 ODTrack 的 1000-token 跨帧记忆），长时序列劣势；③**评测口径**——官方框架 0.495 与我们的 120 序列口径不完全一致，但量级对比仍有效。**为什么它是决策证据而非竞品**：①+7% 相对给了我们『官方数据微调 ODTrack』的增益上界参考（调研估计 +5~10%）；②它证明**『适配收益 &gt; backbone 差距』**——换更强 backbone 不是杠杆，微调预算应投向已接入方案（ODTrack/SUTrack）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>支持『微调 + 7% 相对』的增量估计</li>
+<li>验证三平铺适配路线优于单纯换模型</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>仍低于我们 0.5792（8.4 个点）</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">答辩/决策证据：换更强 backbone 不是当前杠杆；微调预算投给已接入方案。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>docs/TECH_RESEARCH_ZH_2026-08-21.md</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>仅作证据引用。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

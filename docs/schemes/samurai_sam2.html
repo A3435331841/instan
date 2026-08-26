@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SAMURAI / SAM2 系（长时跟踪与重捕获） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="active" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge purple">调研（未实跑）</span>
+    <span class="badge">调研候选 · SAM 生态</span>
+    <span class="badge blue">⏱ 调研 2026-08-21</span>
+  </div>
+  <h1>SAMURAI / SAM2 系（长时跟踪与重捕获）</h1>
+  <div class="summary">SAMURAI（SAM2.1 + Kalman 运动记忆，零训练）：LaSOT 74.2 / GOT-10k 81.7 / OTB100 71.5（与比赛同协议），全遮挡 +12.7%。SAM2 occlusion head 输出可见性分数 = 免费判丢信号，任意帧可重新注入 = 原生找回接口。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">LaSOT AUC</div><div class="m-value">74.2</div><div class="m-scope">SAMURAI（零训练）</div></div>
+<div class="metric"><div class="m-name">OTB100 AUC</div><div class="m-value">71.5</div><div class="m-scope">与比赛同协议</div></div>
+<div class="metric"><div class="m-name">显存</div><div class="m-value">~4GB</div><div class="m-scope">4090 实时</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">SAM2.1 官方权重 + Kalman 运动记忆；不解决全局找回（只在预测邻域内选 mask）；360VOT 工具包自带 mask2Bfov 转换。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**SAMURAI（arXiv 2411.08372，『SAMURAI: Adapting Segment Anything Model for Zero-Shot Visual Tracking with Motion-Aware Memory』）**：零训练（zero-shot）长时跟踪器——复用 SAM2.1 官方权重，关键改动是把 SAM2 的朴素记忆替换为**运动感知记忆（motion-aware memory）**：用 Kalman 滤波预测目标运动，将预测位置作为记忆 token 的定位先验，显著降低遮挡/相似物干扰下的错误传播。LaSOT 74.2 / GOT-10k 81.7 / **OTB100 71.5（与比赛同 OTB 协议）**，全遮挡属性 +12.7%，~4GB 显存 4090 实时。**360 域关键点**：①SAM2 的 occlusion head 输出可见性分数 = 免费判丢信号；②任意帧 `add_new_points_or_box` 重新注入 = 原生找回接口；③但 SAMURAI 只在预测邻域内选 mask，**不解决全局找回**——需配合多切平面检测做 LOST 分支。**mask→BFoV**：360VOT 工具包自带 mask2Bfov/mask2Bbox，取最大连通域防遮挡碎块撑爆外接框。**域警告**：PanoSAM2（arXiv 2604.07901）证明 SAM2 在 360VOTS 有 ~60 J&amp;F 基本盘但接缝/畸变是主要损失源。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么遮挡/长时最强（LaSOT_ext 61.0 领先 7 点）**（结构归因）：SAM2.1 是 promptable 分割基础模型，其记忆机制（memory bank）在遮挡时保留目标历史 mask；SAMURAI 的关键升级是**运动感知记忆**——Kalman 滤波预测目标位置作为记忆 token 的定位先验，遮挡恢复时 SAM2 的 mask 选择被运动先验引导，避免被遮挡物/相似物带偏（全遮挡 +12.7% 即此机理）。**为什么是 recapture 失锁分支的理想升级**：①SAM2 的 occlusion head 输出可见性分数——比我们 recapture 的 NCC 代理判丢信号更本质（直接建模『目标是否可见』）；②`add_new_points_or_box` 可任意帧重新注入目标 = 原生找回接口，无需自研重检测器；③mask→BFoV 转换用 360VOT 工具包现成函数（取最大连通域防碎块撑爆外接框）。**为什么不能直接当主干**：SAMURAI 只在预测邻域内选 mask（无全局找回），且 ERP 全景的接缝/畸变是 SAM2 的主要损失源（PanoSAM2 证明）——需配合多切平面检测 + 环绕 padding 才能用于全景。**定位**：recapture v2 的『判丢信号双分支 + 重捕获』最强候选，而非提交主干。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>零训练直接可用</li>
+<li>遮挡/长时最强（LaSOT_ext 61.0 领先 7 点）</li>
+<li>免费判丢信号 + 原生找回接口</li>
+<li>360VOT 工具包转换现成</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>不解决全局找回（需配合多切平面检测）</li>
+<li>SAM2.1 栈较大，断网镜像体积压力</li>
+<li>PanoSAM2 证明 SAM2 在 360VOTS 接缝/畸变是主要损失源</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">recapture 失锁分支的最强候选：LOST 时用 SAM2 在切平面视角选 mask → mask2Bfov；或作为判丢信号双分支。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>docs/TECH_RESEARCH_ZH_2026-08-21.md</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>调研结论：作为 recapture v2 的重检测/判丢升级项保留；v1 因 representative drop 未到接入阶段。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

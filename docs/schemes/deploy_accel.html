@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="active" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge purple">调研（部分落地 cu128 镜像）</span>
+    <span class="badge">工程加速 · 部署优化</span>
+    <span class="badge blue">⏱ 调研 2026-08-21 ~</span>
+  </div>
+  <h1>RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</h1>
+  <div class="summary">瓶颈定量归因：8.99 FPS 中每帧 ~111ms 约 70ms 在 4K CPU 软解 + 三平铺整图拷贝 + CPU 裁剪。NVDEC 硬解 + GPU 预处理 + BF16 + torch.compile 预计 60-80+ FPS（零/近零精度损失）。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">现状</div><div class="m-value">8.99 FPS</div><div class="m-scope">3090 端到端</div></div>
+<div class="metric"><div class="m-name">纯推理</div><div class="m-value">32 FPS@2080Ti</div><div class="m-scope">ODTrack-B</div></div>
+<div class="metric"><div class="m-name">预测</div><div class="m-value">60-80+ FPS</div><div class="m-scope">5090 + 全加速项</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">①NVDEC 硬解 + 三级流水线（去 40-60ms）②三平铺→单帧直取 crop + 环绕 pad + GPU grid_sample（省 10-15ms）③BF16/FP16 autocast（1.5-2×）④torch.compile（+20-40%）⑤可选 TRT FP16（3-4×，需 sm_120 实测）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**瓶颈定量归因**（调研核心结论）：ODTrack 端到端 8.99 FPS 中每帧 ~111ms 的构成：4K H.264 CPU 软解 40-60ms + 三平铺整图拷贝 66MB 5-15ms + CPU 裁剪 resize 10-30ms——**~70% 开销不在模型**（ODTrack-B 纯推理 32 FPS@2080Ti）。**加速清单技术细节**：①**NVDEC 硬解**（PyNvVideoCodec）+ 解码/预处理/推理三级流水线：9→30+ FPS，零精度损失；②**三平铺 → 单帧直取 crop**：仅目标跨缝时用 `F.pad(mode=&#x27;circular&#x27;)` 或双窄条拼接做水平环绕，裁剪/resize 全上 GPU（`F.grid_sample`），数据搬运降 1-2 个量级；③**BF16/FP16 autocast**：推理 1.5-2×，训练本就是 AMP 故精度损失 &lt;0.3 AUC；④**torch.compile（max-autotune）**：只编译纯 tensor 子图，Inductor 缓存预热进镜像，+20-40%；⑤**TRT FP16**（torch-tensorrt 2.7.0+cu128，必须锁 `tensorrt&gt;=10.8`，10.7 不识别 5090 sm_120）：3-4×，OSTrack 实测 240 vs 70 FPS 参照，但 sm_120 有个例异常报告须实测 + eager fallback。**叠加预测**：5090 现状代码 15-20 FPS → +硬解 25-35 → +GPU 预处理 45-60 → +BF16/compile 60-80+ FPS。**明确不建议**：INT8/FP8（ViT PTQ 掉点 &gt;1%）、降分辨率/ViT-S（掉 2 点起）、DALI/decord（sm_120 无官方 wheel）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么瓶颈在解码/预处理而非模型**（定量归因）：8.99 FPS 的 111ms/帧中，模型纯推理仅占 ~31ms（32 FPS@2080Ti 口径折算），剩余 ~70ms 在 4K H.264 CPU 软解（40-60ms）+ 三平铺整图拷贝 66MB（5-15ms）+ CPU 裁剪 resize（10-30ms）——即 ~70% 时间不在 GPU 计算而在数据搬运/解码。**为什么 NVDEC 硬解收益最大**：GPU 内置 NVDEC 引擎解码 4K H.264 的吞吐是 CPU 软解的 5-10 倍且零 CPU 占用，配合三级流水线（解码/预处理/推理并行）把解码延迟从关键路径移除——这是 9→30+ FPS 的结构性来源（并行化而非提速）。**为什么三平铺→单帧直取 crop 有效**：三平铺的 3× 整图拷贝是纯浪费（只有目标附近被模型使用）；改为单帧直取 crop + 仅跨缝时 circular pad，数据搬运降 1-2 个量级。**为什么 BF16/compile 精度无损**：训练本就是 AMP（模型已对低精度鲁棒），BF16 只降中间精度不降表示容量；torch.compile 只编译纯 tensor 子图（无 Python 开销的算子融合）。**为什么不做 INT8**：ViT 的 PTQ 掉点 &gt;1%（回归任务对量化更敏感），且 sm_120 的 TRT 支持有个例异常——收益/风险比不支持。**叠加逻辑**：每项独立 A/B，掉点 &gt;0.005 即回退（团队纪律）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>前三项零精度损失</li>
+<li>幅度大（9→30→60+ FPS）</li>
+<li>TRT 有 OSTrack 实测 240 vs 70 参照</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>NVDEC/TRT wheel 需预打包进断网镜像</li>
+<li>TRT engine 需 5090 同款卡构建预热</li>
+<li>sm_120 有个例异常需 eager fallback</li>
+<li>不建议 INT8/FP8（ViT PTQ 掉点 &gt;1%）</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">提交/演示帧率不足时按序落地；每项独立 A/B 回归（团队纪律）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>docs/TECH_RESEARCH_ZH_2026-08-21.md</div>
+<div class="file-item"><span class="tag">📄</span>docker/odtrack/build_odtrack_cu128.sh</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>调研结论：速度瓶颈在解码/预处理而非模型；cu128 镜像已就绪，加速项按性价比序落地。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

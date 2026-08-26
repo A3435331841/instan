@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>NCC 基线（BFoV 框架） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="active" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge red">已废弃（历史基线）</span>
+    <span class="badge">经典方法 · 几何框架</span>
+    <span class="badge blue">⏱ Stage 1-2（2026-07）</span>
+  </div>
+  <h1>NCC 基线（BFoV 框架）</h1>
+  <div class="summary">项目最早的端到端原型：BFoV（球面视锥）几何 + 归一化互相关（NCC）局部跟踪器，合成数据上跑通，真实数据全面失败。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">AUC</div><div class="m-value">0.11</div><div class="m-scope">360VOT 6 序列 mean</div></div>
+<div class="metric"><div class="m-name">AUC_dual</div><div class="m-value">0.12</div><div class="m-scope">360VOT 6 序列 mean</div></div>
+<div class="metric"><div class="m-name">SR</div><div class="m-value">0.10</div><div class="m-scope">360VOT 6 序列 mean</div></div>
+<div class="metric"><div class="m-name">FPS</div><div class="m-value">~5-10</div><div class="m-scope">4K 本地 CPU</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">BFoV 几何（球面→切平面投影）+ 恒定角速度状态预测 + NCC 局部匹配 + 判丢/重检测骨架。先验驱动，无学习型组件。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**几何管线**：BFoV 定义为中心 (lon,lat) + 视锥 (fov_h, fov_v)。ERP→BFoV 用 gnomonic 投影（切线平面）：对切平面角偏移 (du,dv)，方向向量 v = c + tan(du)·east + tan(dv)·north，其中 c/east/north 由中心方向与北向叉积构造的右手系（极区退化时 east 取固定方向）。反投影 erp_bbox_from_bfov 由视锥四角方向向量经 _unit_to_lonlat 得到 (lon,lat) 后映射到像素 x=(lon+180)/360·W, y=(90-lat)/180·H。**状态预测**：恒定角速度模型（球面圆周运动假设），对 lon 线性外推，lat 保持——该假设在真实 4K 序列第 7-8 帧即失效（漂移根因）。**NCC 匹配**：模板与搜索图灰度化 + highpass(σ) 预处理后逐像素归一化互相关，峰值 (py,px) 用 _subpixel_peak 亚像素精化；搜索图在 BFoV 窗口内以 sr_ratio 决定 FoV。**判丢**：PSR（峰值旁瓣比）与 APCE 双阈值（lost_psr=3.0, lost_apce=0.5）。超参：patch_size=255, sr_ratio=3.0~6.0, template_size=127, search_scale=2.0, lr=0.02, hp_sigma=3.0。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么在合成/简单场景有效**：NCC 是无参的像素级模板匹配，其成功条件恰好是合成数据的特性——目标外观帧间几乎不变、光照恒定、无遮挡、目标在搜索图中占比足够大（&gt;10%）。此时归一化互相关在数学上就是最优匹配（白噪声假设下的 ML 估计），且球面几何（gnomonic 投影）保证了切图无畸变，匹配精度可达亚像素（_subpixel_peak 精化）。**为什么在真实 4K 全景失效**（结构层面三重因果）：①NCC 的模板是首帧原始像素，真实目标外观变化（形变/光照/视角）使相关性迅速衰减；②4K 全景小目标（&lt;30px）在切图中占比 &lt;5%，搜索窗内峰值被背景噪声淹没；③恒定角速度状态预测是开环外推，第 7-8 帧起预测中心偏离目标，而 NCC 只在预测中心邻域搜索——定位误差与匹配误差正反馈放大。**结论**：NCC+BFoV 的失败是『无学习能力 + 开环状态预测』两个结构性缺陷叠加，而非参数问题（参数搜索已证明天花板）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>零依赖纯 numpy/Pillow/scipy，CPU 可跑</li>
+<li>球面几何模块（BFoV/切平面投影）成为后续全部方案的几何底座</li>
+<li>合成数据（equator/crossing/pole/occlusion）验证了跨界与极区处理的正确性</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>NCC 无学习能力，真实 4K 目标（&lt;30px）占比 &lt;5% 时完全失效</li>
+<li>BFoV 恒定角速度状态预测第 7-8 帧累积漂移</li>
+<li>6 序列 mean AUC 仅 0.11，远低于 Stage 2 目标 0.45</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">仅适合合成数据/低难度验证；真实全景跟踪不可用。但球面几何与判丢骨架被 ODTrack 三平铺与 recapture 外挂继承。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>panotrack/geometry/bfov.py</div>
+<div class="file-item"><span class="tag">📄</span>panotrack/trackers/ncc.py</div>
+<div class="file-item"><span class="tag">📄</span>panotrack/pipeline/state.py</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>废弃为主跟踪器，几何模块保留复用。教训：小样本数字不可信，坚持全量评测。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

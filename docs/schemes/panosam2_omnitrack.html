@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PanoSAM2 / OmniTrack++（方向借鉴） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="active" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge purple">调研（方向引用）</span>
+    <span class="badge">调研借鉴 · 未开源</span>
+    <span class="badge blue">⏱ 调研 2026-08-21</span>
+  </div>
+  <h1>PanoSAM2 / OmniTrack++（方向借鉴）</h1>
+  <div class="summary">PanoSAM2（arXiv 2604.07901，未开源）：环绕 padding 解码器（接缝连续感受野）+ 畸变加权损失 + 长期 object pointer，360VOTS +5.6。OmniTrack++（arXiv 2511.00510）：置信度驱动『端到端跟踪 ↔ 检测全局模式』状态机。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">PanoSAM2</div><div class="m-value">360VOTS +5.6</div><div class="m-scope">J&amp;F，未开源</div></div>
+<div class="metric"><div class="m-name">OmniTrack++</div><div class="m-value">状态机模式切换</div><div class="m-scope">可对照借鉴</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">环绕 padding（几十行手写进 patch embedding）+ 畸变加权损失（用于微调）+ 长期 object pointer 记忆；状态机『跟踪↔检测』切换。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**PanoSAM2（arXiv 2604.07901，未开源）**：面向全景的 SAM2 适配，三大技术点：①**环绕 padding 解码器（circular padding decoder）**——在 patch embedding / attention 阶段对 ERP 接缝做循环 padding，使接缝两侧获得连续感受野（我们可几十行手写进 ODTrack 的 patch embedding，与三平铺互补）；②**畸变加权损失（distortion-weighted loss）**——按 ERP 纬度畸变权重（cos(lat) 面积比）重新加权损失，抑制极区过采样（可并入官方数据微调的损失）；③**长期 object pointer 记忆**——跨长时段的显式目标指针，缓解 SAM 短期记忆漂移。360VOTS 上 +5.6（J&amp;F）。**OmniTrack++（arXiv 2511.00510）**：置信度驱动的『端到端跟踪 ↔ 检测全局模式』状态机——低置信切全局检测模式、恢复后切回端到端跟踪；其模式切换逻辑与我们 adaptive_spherical 的 NORMAL/LOST/VERIFY 同构，可作为状态机调参的对照参考。**引用纪律**：两文均未开源、数字为论文口径，答辩引用需注明『调研转述』。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么环绕 padding 对全景跟踪有效**（结构归因）：ERP 接缝两侧在物理上是连续场景（经度 0° 与 360° 相邻），但标准 CNN/transformer 的 padding 把接缝当不相关边界——patch embedding 在接缝处截断感受野，目标跨界时特征被『切开』。环绕 padding（circular）把接缝两侧的像素循环拼接，使接缝处感受野连续，模型能看到『完整的跨界目标』——这与我们三平铺解决同一问题，但**粒度更细**（在特征层解决 vs 输入层解决），且不增加 3 倍输入开销（可叠加在三平铺上）。**为什么畸变加权损失有效**：ERP 的纬度畸变使极区像素面积被拉伸（cos(lat) 面积比），标准损失在极区过采样、赤道欠采样；按 cos(lat) 反权重可让模型公平学习各纬度——小目标/极区序列的增益来源。**为什么 OmniTrack++ 状态机与我们同构**：置信度驱动的『跟踪↔检测』模式切换 = 我们的 NORMAL/LOST/VERIFY 四态；文献独立得出相同结论（低置信切全局模式），为 adaptive_spherical 的架构合理性提供外部背书。**引用纪律**：两文未开源，数字（+5.6 J&amp;F）为论文口径，答辩引用注明『调研转述』。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>环绕 padding 零成本可落地（低工程量）</li>
+<li>畸变加权损失可并入微调</li>
+<li>状态机设计与 adaptive_spherical 同构可对照</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>均未开源，仅方向借鉴</li>
+<li>PanoSAM2 数字为论文口径需核实</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">技术路线借鉴：环绕 padding 可手写进 ODTrack patch embedding；状态机可对照 adaptive_spherical。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>docs/TECH_RESEARCH_ZH_2026-08-21.md</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>低风险项（环绕 padding）可并入微调/评测管线；状态机思想已体现在 adaptive_spherical。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

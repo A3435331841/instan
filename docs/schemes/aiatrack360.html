@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AiATrack-360（公开文献 SOTA 对照） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="active" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge purple">调研（对照基线）</span>
+    <span class="badge">调研对照 · 文献标杆</span>
+    <span class="badge blue">⏱ 调研 2026-08-21</span>
+  </div>
+  <h1>AiATrack-360（公开文献 SOTA 对照）</h1>
+  <div class="summary">TPAMI 2025 全景单目标跟踪公开榜首（S_dual 0.534），官方框架集成。我们本地 0.5792 已超出 +8.4%，2025-2026 无人刷新。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">S_dual AUC</div><div class="m-value">0.534</div><div class="m-scope">TPAMI 2025 Table III</div></div>
+<div class="metric"><div class="m-name">我们的对比</div><div class="m-value">0.5792</div><div class="m-scope">超出 +8.4%</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">AiATrack（注意力增强跟踪）+ 360VOT 官方框架集成，tangent crop 搜索图。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**AiATrack（ECCV 2022 / TPAMI 2025）**：以 attention 增强的视觉跟踪器——在孪生/transformer 基线上引入**目标感知注意力（target-aware attention）**与**时间语义关联（temporal semantic association）**，缓解遮挡与相似物干扰下的模板退化。TPAMI 2025 版集成进 360VOT 官方框架，以 **tangent crop（切平面投影搜索图）** 方式适配全景：目标中心投影到切平面、裁剪无畸变局部图送入跟踪器（替代我们用的三平铺）。**公开成绩**：S_dual AUC 0.534（360VOT 官方榜 TPAMI 2025 Table III 榜首），2025-2026 无新全景跟踪架构发表刷新。**与我们方案的对照意义**：①我们本地 0.5792 超其 +8.4%，成为『公开文献事实 SOTA』的答辩锚点；②tangent crop 集成 +12.9%（vs 官方基线）说明切平面搜索图的适配价值——我们已用三平铺打底，边际收益小（+3~8%）。**域知识**：切平面表示在 FoV ≥ 90° 时自身失真（0.534→0.449 消融）——大目标需回退球面片段。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么 tangent crop 在 360VOT 官方框架里有效（+12.9%）**（结构归因）：切平面（tangent/gnomonic）投影把球面局部区域展开为无畸变平面图——目标在切平面内保持透视相机下的形状（正对目标时），与跟踪器预训练分布（透视数据）一致，模型无需适应 ERP 畸变。这正是『三平铺 vs tangent crop』的路线对照：三平铺用『3 倍输入 + 平移不变』解决接缝，tangent crop 用『几何投影 + 无畸变』解决畸变——两条路都有效，但**各自解决的是不同问题**（接缝分裂 vs 投影畸变）。**为什么 AiATrack 本身被我们反超（0.534 vs 0.5792）**：AiATrack 的 target-aware attention 在透视域是强方法，但 360VOT 官方框架的适配（tangent crop + BFoV 协议）固定了搜索范式；我们三平铺 + ODTrack dense memory 的组合在 360 域取得了更大的适配收益。**为什么切平面在 FoV≥90° 失效（0.534→0.449）**：gnomonic 投影在大视角下边缘拉伸剧烈（tan 发散），切图畸变超过模型容忍度——大目标（近距/大 FoV）需回退球面片段或分块，这是全景适配的通用边界条件，对三平铺同样成立。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>答辩锚点：证明我们是公开文献事实 SOTA</li>
+<li>tangent crop 搜索图思路（+12.9%）可借鉴</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>公开结果被我们反超</li>
+<li>官方框架集成路径与三平铺不同</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">答辩叙事：『本地 0.5792 超公开 SOTA（AiATrack-360 0.534）约 +8.4%』。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>docs/TECH_RESEARCH_ZH_2026-08-21.md</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>仅作对照与答辩素材。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

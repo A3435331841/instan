@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Direct ERP + VitTrack（全帧直连） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="active" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge amber">历史/本地验证方案</span>
+    <span class="badge">全帧跟踪 · 历史方案</span>
+    <span class="badge blue">⏱ Stage 2-3（2026-07-25 ~ 08）</span>
+  </div>
+  <h1>Direct ERP + VitTrack（全帧直连）</h1>
+  <div class="summary">绕过 BFoV 切图，直接在全帧 ERP 上跑 VitTrack。精度与 BFoV 持平但速度提升 20 倍、彻底消除漂移——是『全帧直连』路线的首个证据。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">AUC</div><div class="m-value">0.26</div><div class="m-scope">360VOT 6 序列 mean (100帧)</div></div>
+<div class="metric"><div class="m-name">AUC_dual</div><div class="m-value">0.26</div><div class="m-scope">同上</div></div>
+<div class="metric"><div class="m-name">FPS</div><div class="m-value">155.6</div><div class="m-scope">4K downscale 0.5</div></div>
+<div class="metric"><div class="m-name">对比</div><div class="m-value">BFoV+VitTrack 0.25 / 8 FPS</div><div class="m-scope">同口径</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">ERP 全帧直喂 VitTrack（onnxruntime 双子图或 cv2），仅处理 360° 边界 x 回绕。无状态预测、无切图、无坐标转换。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**输入表示**：全帧 ERP (H,W,3) 直接送入 VitTrack，无 BFoV 切图。目标在 ERP 坐标 (x,y,w,h) 下直接跟踪，搜索区域即整幅全景（VitTrack 内部以模板为中心的注意力天然覆盖全帧）。**边界回绕**：update() 中预测框 x&lt;0 时 +=W，x≥W 时 -=W，最终 x 钳制到 [0,W-w)——处理 360° 经度环绕。**推理后端**：onnxruntime 双子图（backbone 提取模板/搜索特征 → tracking head 回归），无 cv2 依赖；旧 cv2.TrackerVit 仅作本地验证 fallback。**预处理消融**（关键实证）：Raw ERP 帧最优（AUC 0.263, FPS 159）；highpass σ=3 降至 0.082（移除低频上下文信息，严重损害）；σ=5 为 0.094。**多尺度消融**：单尺度最优（0.263, 172 FPS）；0.5x 金字塔略降（0.261, 93 FPS）——VitTrack 内置 sr_ratio 已处理多尺度搜索，外部金字塔无益。**配置**：tracker=direct_erp, model_path=object_tracking_vittrack_2023sep.onnx。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么消除漂移**（结构对比）：BFoV 方案是『预测中心 → 切图 → 局部匹配』的开环链路，预测误差沿时间累积；Direct ERP 是『全帧输入 → 全局匹配』的闭环——VitTrack 的注意力天然覆盖整幅全景，目标出现在任何经度都能被搜索到，不存在『预测中心偏离』这一失效模式。**为什么 Raw ERP 优于 highpass**（预处理归因）：highpass 滤除低频分量，而 ERP 全景的低频信息（大面积天空/地面/场景布局）恰是目标定位的全局上下文；VitTrack 的 patch embedding 需要完整频谱建模目标与环境的关系，滤波后特征判别力骤降（AUC 0.26→0.08）。**为什么多尺度金字塔无益**：VitTrack 内部 sr_ratio 机制已在特征空间内做多尺度搜索，外部像素级金字塔是冗余且引入额外插值噪声。**为什么速度快 20 倍**：省去切图投影、状态预测、坐标转换三处每帧计算 + 省去小图重采样，只做一次全帧前向与一次 x 回绕。**局限的机理**：精度仅 0.26 是因为 VitTrack 本身能力上限（无时序记忆、无重捕获），Direct ERP 只是『最大化单帧匹配』，无法积累时序信息——这解释了为何它被有 dense temporal memory 的 ODTrack 超越（0.26→0.58）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>消除框架漂移（无状态预测累积误差）</li>
+<li>速度 20 倍于 BFoV（155 vs 8 FPS）</li>
+<li>实现简单：仅 x 坐标模 W 回绕</li>
+<li>Raw ERP 帧最优（highpass 损害 AUC 0.26→0.08；多尺度金字塔无益）</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>全帧 4K 输入内存/带宽开销大（被 ODTrack 三平铺的降采样解决）</li>
+<li>精度仍只有 0.26 量级（VitTrack 自身能力上限）</li>
+<li>生产路径需要 ONNX 双模型（backbone + tracking）</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">验证了全帧直连的可行性；速度-精度权衡的基准。后被 ODTrack 三平铺超越（0.26→0.58）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>panotrack/trackers/direct_erp.py</div>
+<div class="file-item"><span class="tag">📄</span>configs/direct_erp_vit.json</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>作为历史方案保留；其『消除漂移 + 全帧上下文』思想被 ODTrack 三平铺继承。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

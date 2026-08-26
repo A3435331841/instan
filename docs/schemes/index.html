@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>技术方案图谱 · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="index-hero">
+  <h1>GRT-360 全景跟踪技术方案图谱</h1>
+  <p>20 个技术方案（14 个真实跑过 + 6 个调研候选）的完整剖析：架构设计、优缺点、适用场景与关键指标。
+  数据来自 2026-08-26 拉取的远端赛马汇总与 8/21 四路技术调研。</p>
+  <div class="legend">
+    <span class="item"><span class="badge green">已提交/核心候选</span></span>
+    <span class="item"><span class="badge blue">保留/已实测</span></span>
+    <span class="item"><span class="badge amber">开发中/降级</span></span>
+    <span class="item"><span class="badge red">已废弃</span></span>
+    <span class="item"><span class="badge purple">调研候选</span></span>
+  </div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📑</span>全方案总览</h2>
+  <div style="overflow-x:auto;">
+  <table class="overview-table">
+    <thead><tr><th>方案</th><th>类别</th><th>状态</th><th>关键指标</th><th>阶段</th></tr></thead>
+    <tbody><tr><td><a href='ncc_bfov.html'>NCC 基线（BFoV 框架）</a></td><td>经典方法 · 几何框架</td><td><span class="badge red">已废弃（历史基线）</span></td><td class='num'>0.11; 0.12</td><td style='color:var(--text-dim);font-size:12px;'>Stage 1-2（2026-07）</td></tr><tr><td><a href='bfov_vittrack.html'>BFoV + VitTrack（框架漂移验证）</a></td><td>经典方法 · 几何框架 + 学习跟踪器</td><td><span class="badge red">已废弃（关键反面教材）</span></td><td class='num'>0.25; 0.26</td><td style='color:var(--text-dim);font-size:12px;'>Stage 2（2026-07-25 前后）</td></tr><tr><td><a href='direct_erp_vittrack.html'>Direct ERP + VitTrack（全帧直连）</a></td><td>全帧跟踪 · 历史方案</td><td><span class="badge amber">历史/本地验证方案</span></td><td class='num'>0.26; 0.26</td><td style='color:var(--text-dim);font-size:12px;'>Stage 2-3（2026-07-25 ~ 08）</td></tr><tr><td><a href='lightfc.html'>LightFC ONNX（轻量全帧跟踪器）</a></td><td>全帧跟踪 · 轻量 ONNX</td><td><span class="badge amber">已降级（历史推荐→全量翻车）</span></td><td class='num'>0.618; 0.3116</td><td style='color:var(--text-dim);font-size:12px;'>Stage 2-3（2026-07-25 ~ 08-09）</td></tr><tr><td><a href='odtrack_erp3.html'>ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a></td><td>全景适配 · 三平铺</td><td><span class="badge green">已提交（初赛成绩冻结）</span></td><td class='num'>0.5792; 0.6532</td><td style='color:var(--text-dim);font-size:12px;'>Stage 3（2026-08-09 ~ 08-14）</td></tr><tr><td><a href='uetrack_erpwrap.html'>UETrack ERP-wrap（高速基线）</a></td><td>全景适配 · ERP 环绕</td><td><span class="badge blue">保留（高速基线/蒸馏起点）</span></td><td class='num'>0.5143; 0.5776</td><td style='color:var(--text-dim);font-size:12px;'>Stage 3（2026-08-09 ~）</td></tr><tr><td><a href='odtrack_finetune.html'>ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a></td><td>域微调 · 训练</td><td><span class="badge amber">验证中（组件候选）</span></td><td class='num'>0.4535~0.4817; 0.4962~0.5279</td><td style='color:var(--text-dim);font-size:12px;'>决赛冲刺（2026-08-22 ~）</td></tr><tr><td><a href='sutrack.html'>SUTrack（B224 / T224）</a></td><td>通用 SOT · 自回归</td><td><span class="badge green">核心候选（精度/快路径双线）</span></td><td class='num'>0.6113; 0.7223</td><td style='color:var(--text-dim);font-size:12px;'>决赛冲刺（2026-08-24 ~）</td></tr><tr><td><a href='lorat.html'>LoRAT（B378/L378，LoRA 高效跟踪）</a></td><td>通用 SOT · LoRA 微调</td><td><span class="badge blue">真实场景专家（保留）</span></td><td class='num'>0.6021; 0.7275</td><td style='color:var(--text-dim);font-size:12px;'>决赛冲刺（2026-08-21 ~）</td></tr><tr><td><a href='odtrack_recapture.html'>ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a></td><td>系统级外挂 · 可靠性门控</td><td><span class="badge blue">已实测（drop）</span></td><td class='num'>0.3981; 0.4007</td><td style='color:var(--text-dim);font-size:12px;'>2026-08-10 ~ 08-14</td></tr><tr><td><a href='fusion_family.html'>融合族（fusion_2way ~ 8way）</a></td><td>多模型融合</td><td><span class="badge blue">已实测（增益有限）</span></td><td class='num'>0.522; 0.522</td><td style='color:var(--text-dim);font-size:12px;'>决赛冲刺（2026-08-24 ~）</td></tr><tr><td><a href='causal_dtp.html'>Causal-DTP-ERP（教师-学生路由）</a></td><td>多模型路由 · 创新实验</td><td><span class="badge blue">已实测（保守路由保护教师）</span></td><td class='num'>0.5792; 0.6532</td><td style='color:var(--text-dim);font-size:12px;'>2026-08-10 ~</td></tr><tr><td><a href='adaptive_spherical.html'>adaptive_spherical（自适应球面状态机）</a></td><td>自适应系统 · Phase 2 创新</td><td><span class="badge amber">开发中（v1 未过 micro gate，v2 排队）</span></td><td class='num'>0.3623; 0.5570</td><td style='color:var(--text-dim);font-size:12px;'>Phase 2（2026-08-26 ~）</td></tr><tr><td><a href='spherical_memory.html'>Spherical Memory（球面记忆）</a></td><td>全景专项 · 记忆增强</td><td><span class="badge blue">已实现（配置存在，未进入赛马主线）</span></td><td class='num'>channels=24, template_size=64; 未进入赛马主线</td><td style='color:var(--text-dim);font-size:12px;'>2026-08 中旬</td></tr><tr><td><a href='spmtrack.html'>SPMTrack（CVPR 2025，LaSOT 最高可复现）</a></td><td>调研候选 · 未实跑</td><td><span class="badge purple">调研（未接入）</span></td><td class='num'>77.4 / 76.8 / 74.9; 未公布</td><td style='color:var(--text-dim);font-size:12px;'>调研 2026-08-21</td></tr><tr><td><a href='samurai_sam2.html'>SAMURAI / SAM2 系（长时跟踪与重捕获）</a></td><td>调研候选 · SAM 生态</td><td><span class="badge purple">调研（未实跑）</span></td><td class='num'>74.2; 71.5</td><td style='color:var(--text-dim);font-size:12px;'>调研 2026-08-21</td></tr><tr><td><a href='aiatrack360.html'>AiATrack-360（公开文献 SOTA 对照）</a></td><td>调研对照 · 文献标杆</td><td><span class="badge purple">调研（对照基线）</span></td><td class='num'>0.534; 0.5792</td><td style='color:var(--text-dim);font-size:12px;'>调研 2026-08-21</td></tr><tr><td><a href='lorat360_official_ft.html'>LoRAT-360 官方微调（文献证据）</a></td><td>调研对照 · 文献证据</td><td><span class="badge purple">调研（他人实验）</span></td><td class='num'>0.495; +7%</td><td style='color:var(--text-dim);font-size:12px;'>调研 2026-08-21</td></tr><tr><td><a href='panosam2_omnitrack.html'>PanoSAM2 / OmniTrack++（方向借鉴）</a></td><td>调研借鉴 · 未开源</td><td><span class="badge purple">调研（方向引用）</span></td><td class='num'>360VOTS +5.6; 状态机模式切换</td><td style='color:var(--text-dim);font-size:12px;'>调研 2026-08-21</td></tr><tr><td><a href='deploy_accel.html'>RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a></td><td>工程加速 · 部署优化</td><td><span class="badge purple">调研（部分落地 cu128 镜像）</span></td><td class='num'>8.99 FPS; 32 FPS@2080Ti</td><td style='color:var(--text-dim);font-size:12px;'>调研 2026-08-21 ~</td></tr></tbody>
+  </table>
+  </div>
+</div>
+
+<h2 style="margin:8px 4px 4px;font-size:17px;">方案卡片</h2>
+<div class="index-grid"><a class="index-card" href="ncc_bfov.html">
+  <div class="meta-line"><span class="badge red">已废弃（历史基线）</span></div>
+  <h3>NCC 基线（BFoV 框架）</h3>
+  <div class="cat">经典方法 · 几何框架 · Stage 1-2（2026-07）</div>
+  <div class="desc">项目最早的端到端原型：BFoV（球面视锥）几何 + 归一化互相关（NCC）局部跟踪器，合成数据上跑通，真实数据全面失败。</div>
+  <div class="foot">
+    <span class="badge blue">0.11; 0.12</span>
+  </div>
+</a><a class="index-card" href="bfov_vittrack.html">
+  <div class="meta-line"><span class="badge red">已废弃（关键反面教材）</span></div>
+  <h3>BFoV + VitTrack（框架漂移验证）</h3>
+  <div class="cat">经典方法 · 几何框架 + 学习跟踪器 · Stage 2（2026-07-25 前后）</div>
+  <div class="desc">在 BFoV 框架上接入学习型跟踪器 VitTrack（ONNX），验证了『几何框架 + 学习跟踪器』策略对单序列有效（0036: 0.05→0.74），但整体被框架漂移拖垮。</div>
+  <div class="foot">
+    <span class="badge blue">0.25; 0.26</span>
+  </div>
+</a><a class="index-card" href="direct_erp_vittrack.html">
+  <div class="meta-line"><span class="badge amber">历史/本地验证方案</span></div>
+  <h3>Direct ERP + VitTrack（全帧直连）</h3>
+  <div class="cat">全帧跟踪 · 历史方案 · Stage 2-3（2026-07-25 ~ 08）</div>
+  <div class="desc">绕过 BFoV 切图，直接在全帧 ERP 上跑 VitTrack。精度与 BFoV 持平但速度提升 20 倍、彻底消除漂移——是『全帧直连』路线的首个证据。</div>
+  <div class="foot">
+    <span class="badge blue">0.26; 0.26</span>
+  </div>
+</a><a class="index-card" href="lightfc.html">
+  <div class="meta-line"><span class="badge amber">已降级（历史推荐→全量翻车）</span></div>
+  <h3>LightFC ONNX（轻量全帧跟踪器）</h3>
+  <div class="cat">全帧跟踪 · 轻量 ONNX · Stage 2-3（2026-07-25 ~ 08-09）</div>
+  <div class="desc">LightFC（特征关联轻量跟踪器）经 ONNX 双子图接入全帧路线。代表序列 AUC 0.618 一度为推荐方案，120 序列全量评测仅 0.3116——小样本数字的典型教训。</div>
+  <div class="foot">
+    <span class="badge blue">0.618; 0.3116</span>
+  </div>
+</a><a class="index-card" href="odtrack_erp3.html">
+  <div class="meta-line"><span class="badge green">已提交（初赛成绩冻结）</span></div>
+  <h3>ODTrack ERP 三平铺（初赛提交 · 精度冠军）</h3>
+  <div class="cat">全景适配 · 三平铺 · Stage 3（2026-08-09 ~ 08-14）</div>
+  <div class="desc">把 ODTrack（自回归密集时序跟踪器）适配到 ERP 全景：目标区域三平铺展开送入模型，成为 120 序列赛马冠军并作为初赛提交镜像。公开文献事实 SOTA（超 AiATrack-360 0.534 约 +8.4%）。</div>
+  <div class="foot">
+    <span class="badge blue">0.5792; 0.6532</span>
+  </div>
+</a><a class="index-card" href="uetrack_erpwrap.html">
+  <div class="meta-line"><span class="badge blue">保留（高速基线/蒸馏起点）</span></div>
+  <h3>UETrack ERP-wrap（高速基线）</h3>
+  <div class="cat">全景适配 · ERP 环绕 · Stage 3（2026-08-09 ~）</div>
+  <div class="desc">UETrack（统一高效跟踪器）以 ERP-wrap 形式接入（搜索图环绕 padding），120 序列 AUC 0.5143 / 57.16 FPS，速度是 ODTrack 的 6 倍多，是快路径与知识蒸馏学生模型的起点。</div>
+  <div class="foot">
+    <span class="badge blue">0.5143; 0.5776</span>
+  </div>
+</a><a class="index-card" href="odtrack_finetune.html">
+  <div class="meta-line"><span class="badge amber">验证中（组件候选）</span></div>
+  <h3>ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</h3>
+  <div class="cat">域微调 · 训练 · 决赛冲刺（2026-08-22 ~）</div>
+  <div class="desc">用官方 130 序列（train95/valid35 划分，valid 绝不训练）对 ODTrack 微调，产出 ft_ep1-8 与 failure-balanced v4/v5 系列。目标是域自适应，但 medium 30 上无一超越基线的量级突破，作为组件保留。</div>
+  <div class="foot">
+    <span class="badge blue">0.4535~0.4817; 0.4962~0.5279</span>
+  </div>
+</a><a class="index-card" href="sutrack.html">
+  <div class="meta-line"><span class="badge green">核心候选（精度/快路径双线）</span></div>
+  <h3>SUTrack（B224 / T224）</h3>
+  <div class="cat">通用 SOT · 自回归 · 决赛冲刺（2026-08-24 ~）</div>
+  <div class="desc">SUTrack（自回归单目标跟踪器，AAAI 2025）B224/T224 双尺寸接入。**B224 官方 all130 首超 ODTrack 基线（AUC 0.6113 vs 0.5882）**，成为当前最强单模型；T224 是快路径核心（39 FPS）。与 ODTrack 清晰互补（36 修复 vs 16 退步序列）。</div>
+  <div class="foot">
+    <span class="badge blue">0.6113; 0.7223</span>
+  </div>
+</a><a class="index-card" href="lorat.html">
+  <div class="meta-line"><span class="badge blue">真实场景专家（保留）</span></div>
+  <h3>LoRAT（B378/L378，LoRA 高效跟踪）</h3>
+  <div class="cat">通用 SOT · LoRA 微调 · 决赛冲刺（2026-08-21 ~）</div>
+  <div class="desc">LoRAT（ECCV 2024，LoRA 参数高效微调跟踪器，码基最现代）接入。representative 上精度最强（AUC 0.6021 / SR 0.7275），但 medium 速度慢（8.7 FPS）且泛化衰减，定位为真实场景精度专家而非主干。</div>
+  <div class="foot">
+    <span class="badge blue">0.6021; 0.7275</span>
+  </div>
+</a><a class="index-card" href="odtrack_recapture.html">
+  <div class="meta-line"><span class="badge blue">已实测（drop）</span></div>
+  <h3>ODTrack + Recapture 外挂（判丢 + 球面重捕获）</h3>
+  <div class="cat">系统级外挂 · 可靠性门控 · 2026-08-10 ~ 08-14</div>
+  <div class="desc">给 ODTrack 装『判丢 + 全图找回』外挂：ReliabilityGate（多信号融合判丢）+ TemplateMemory + 多切平面重检测。针对 10 条失锁序列设计，目标是救回一半（+0.02~0.04），但 representative 实测 AUC 0.3981 被 drop。</div>
+  <div class="foot">
+    <span class="badge blue">0.3981; 0.4007</span>
+  </div>
+</a><a class="index-card" href="fusion_family.html">
+  <div class="meta-line"><span class="badge blue">已实测（增益有限）</span></div>
+  <h3>融合族（fusion_2way ~ 8way）</h3>
+  <div class="cat">多模型融合 · 决赛冲刺（2026-08-24 ~）</div>
+  <div class="desc">对全部候选做组合融合（2/3/4/5/6/8-way，含 v1v4/ep7 变体）。30/30 最优 fusion_5way AUC 0.522，仅比单模型最好（sutrack_b224 0.4919）高 3 个点，远低于 oracle 上限 0.5779。</div>
+  <div class="foot">
+    <span class="badge blue">0.522; 0.522</span>
+  </div>
+</a><a class="index-card" href="causal_dtp.html">
+  <div class="meta-line"><span class="badge blue">已实测（保守路由保护教师）</span></div>
+  <h3>Causal-DTP-ERP（教师-学生路由）</h3>
+  <div class="cat">多模型路由 · 创新实验 · 2026-08-10 ~</div>
+  <div class="desc">教师（ODTrack 三平铺）+ 学生（UETrack ERP-wrap）+ Scout（LightFC）三模型，Scout 判定难度后决定是否调用教师。当前保守路由保护 ODTrack 精度（AUC 与 ODTrack 相同 0.5792），未带来增量。</div>
+  <div class="foot">
+    <span class="badge blue">0.5792; 0.6532</span>
+  </div>
+</a><a class="index-card" href="adaptive_spherical.html">
+  <div class="meta-line"><span class="badge amber">开发中（v1 未过 micro gate，v2 排队）</span></div>
+  <h3>adaptive_spherical（自适应球面状态机）</h3>
+  <div class="cat">自适应系统 · Phase 2 创新 · Phase 2（2026-08-26 ~）</div>
+  <div class="desc">Phase 2 的核心自研：NORMAL/SUSPECT/LOST/VERIFY 四态状态机 + 球面运动证据 + anchor 校验 + 稀疏专家 token 预算 + 延迟自适应调用 + 状态化专家片段。首个 micro gate（seq_0046 前 80 帧）复现 T224 结果但多付 20% B224 探测开销，v1 未晋升。</div>
+  <div class="foot">
+    <span class="badge blue">0.3623; 0.5570</span>
+  </div>
+</a><a class="index-card" href="spherical_memory.html">
+  <div class="meta-line"><span class="badge blue">已实现（配置存在，未进入赛马主线）</span></div>
+  <h3>Spherical Memory（球面记忆）</h3>
+  <div class="cat">全景专项 · 记忆增强 · 2026-08 中旬</div>
+  <div class="desc">自研球面记忆模块（spherical_memory 配置/模型存在：24 通道，模板 64，update_threshold 0.45），用于模板更新与球面状态记忆，作为可选 tracker 接入。未出现在 medium/representative 赛马结果中。</div>
+  <div class="foot">
+    <span class="badge blue">channels=24, template_size=64; 未进入赛马主线</span>
+  </div>
+</a><a class="index-card" href="spmtrack.html">
+  <div class="meta-line"><span class="badge purple">调研（未接入）</span></div>
+  <h3>SPMTrack（CVPR 2025，LaSOT 最高可复现）</h3>
+  <div class="cat">调研候选 · 未实跑 · 调研 2026-08-21</div>
+  <div class="desc">CVPR 2025 通用 SOT，LaSOT AUC 77.4/76.8/74.9（G/L/B），公开可复现最高。LoRAT 码基同源，接入成本预估可控，但 360 域直接证据缺失，优先级低于三平铺适配收益。</div>
+  <div class="foot">
+    <span class="badge blue">77.4 / 76.8 / 74.9; 未公布</span>
+  </div>
+</a><a class="index-card" href="samurai_sam2.html">
+  <div class="meta-line"><span class="badge purple">调研（未实跑）</span></div>
+  <h3>SAMURAI / SAM2 系（长时跟踪与重捕获）</h3>
+  <div class="cat">调研候选 · SAM 生态 · 调研 2026-08-21</div>
+  <div class="desc">SAMURAI（SAM2.1 + Kalman 运动记忆，零训练）：LaSOT 74.2 / GOT-10k 81.7 / OTB100 71.5（与比赛同协议），全遮挡 +12.7%。SAM2 occlusion head 输出可见性分数 = 免费判丢信号，任意帧可重新注入 = 原生找回接口。</div>
+  <div class="foot">
+    <span class="badge blue">74.2; 71.5</span>
+  </div>
+</a><a class="index-card" href="aiatrack360.html">
+  <div class="meta-line"><span class="badge purple">调研（对照基线）</span></div>
+  <h3>AiATrack-360（公开文献 SOTA 对照）</h3>
+  <div class="cat">调研对照 · 文献标杆 · 调研 2026-08-21</div>
+  <div class="desc">TPAMI 2025 全景单目标跟踪公开榜首（S_dual 0.534），官方框架集成。我们本地 0.5792 已超出 +8.4%，2025-2026 无人刷新。</div>
+  <div class="foot">
+    <span class="badge blue">0.534; 0.5792</span>
+  </div>
+</a><a class="index-card" href="lorat360_official_ft.html">
+  <div class="meta-line"><span class="badge purple">调研（他人实验）</span></div>
+  <h3>LoRAT-360 官方微调（文献证据）</h3>
+  <div class="cat">调研对照 · 文献证据 · 调研 2026-08-21</div>
+  <div class="desc">文献中唯一做过 360 微调的方法：LoRAT 接入 360VOT 官方框架微调后 0.461→0.495（+7% 相对），仍低于我们的 0.5792。证明『ERP 三平铺适配收益 &gt; backbone 差距』。</div>
+  <div class="foot">
+    <span class="badge blue">0.495; +7%</span>
+  </div>
+</a><a class="index-card" href="panosam2_omnitrack.html">
+  <div class="meta-line"><span class="badge purple">调研（方向引用）</span></div>
+  <h3>PanoSAM2 / OmniTrack++（方向借鉴）</h3>
+  <div class="cat">调研借鉴 · 未开源 · 调研 2026-08-21</div>
+  <div class="desc">PanoSAM2（arXiv 2604.07901，未开源）：环绕 padding 解码器（接缝连续感受野）+ 畸变加权损失 + 长期 object pointer，360VOTS +5.6。OmniTrack++（arXiv 2511.00510）：置信度驱动『端到端跟踪 ↔ 检测全局模式』状态机。</div>
+  <div class="foot">
+    <span class="badge blue">360VOTS +5.6; 状态机模式切换</span>
+  </div>
+</a><a class="index-card" href="deploy_accel.html">
+  <div class="meta-line"><span class="badge purple">调研（部分落地 cu128 镜像）</span></div>
+  <h3>RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</h3>
+  <div class="cat">工程加速 · 部署优化 · 调研 2026-08-21 ~</div>
+  <div class="desc">瓶颈定量归因：8.99 FPS 中每帧 ~111ms 约 70ms 在 4K CPU 软解 + 三平铺整图拷贝 + CPU 裁剪。NVDEC 硬解 + GPU 预处理 + BF16 + torch.compile 预计 60-80+ FPS（零/近零精度损失）。</div>
+  <div class="foot">
+    <span class="badge blue">8.99 FPS; 32 FPS@2080Ti</span>
+  </div>
+</a></div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

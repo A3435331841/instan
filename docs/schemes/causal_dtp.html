@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Causal-DTP-ERP（教师-学生路由） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="active" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge blue">已实测（保守路由保护教师）</span>
+    <span class="badge">多模型路由 · 创新实验</span>
+    <span class="badge blue">⏱ 2026-08-10 ~</span>
+  </div>
+  <h1>Causal-DTP-ERP（教师-学生路由）</h1>
+  <div class="summary">教师（ODTrack 三平铺）+ 学生（UETrack ERP-wrap）+ Scout（LightFC）三模型，Scout 判定难度后决定是否调用教师。当前保守路由保护 ODTrack 精度（AUC 与 ODTrack 相同 0.5792），未带来增量。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">AUC</div><div class="m-value">0.5792</div><div class="m-scope">与 ODTrack 相同（保守路由）</div></div>
+<div class="metric"><div class="m-name">SR</div><div class="m-value">0.6532</div><div class="m-scope">同上</div></div>
+<div class="metric"><div class="m-name">FPS</div><div class="m-value">8.99</div><div class="m-scope">教师调用率未降</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">Scout（LightFC）低开销预判 → 难度路由：简单帧走学生（UETrack 快路径），难帧调教师（ODTrack 精度）。意图是降低教师调用率换速度，同时保精度。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**教师-学生-侦察三模型路由**：教师=ODTrack ERP 三平铺（AUC 0.5792 精度锚点），学生=UETrack ERP-wrap（57 FPS 快路径），Scout=LightFC ONNX（CPU 可跑的低开销预判器）。**路由策略**：Scout 逐帧输出置信度/难度信号 → 低于阈值的帧调用学生（快路径），高于阈值（疑似困难/失锁）才调用教师（精度路径）。**实现**（scripts/fuse_causal_dtp_erp.py）：`fuse_sequence` 按帧融合两路输出，`circular_blend_box` 做跨界框的循环融合（经度环绕语义下的框混合），`fuse_geometry_experts` 融合几何专家。**当前状态**：保守路由——Scout 判难不充分时全部回退教师，结果 AUC/SR/FPS 与纯 ODTrack 完全一致（0.5792/0.6532/8.99），即路由未带来任何增量。**设计意图**：先保精度（教师全调），后续训练学生模型后逐步降低教师调用率，兑现速度收益。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么思路对但没兑现**（结构性归因）：难度感知路由的前提是『Scout 能可靠区分简单/困难帧』——但 LightFC 作为 Scout 的判难信号（其置信度/响应）与真实难度（ODTrack 是否会失锁）相关性未经标定，保守路由直接回退教师，导致 100% 教师调用。**为什么保守路由 AUC 与 ODTrack 完全相同**：代码路径上简单帧也走教师（Scout 判难阈值保守），等于没有路由——0.5792/0.6532/8.99 三个数字与 ODTrack 逐位一致，是『路由未生效』的直接证据。**什么条件下会有效**：①Scout 换成与教师失锁模式强相关的信号（如 anchor 相似度、运动一致性——recapture 已证明这些离线信号有区分度 0.747）；②学生模型训练完成（知识蒸馏让 UETrack 逼近 ODTrack 精度），简单帧用学生不掉点；③路由阈值用 60/60 留出标定而非启发式。**与 adaptive_spherical 的关系**：Causal-DTP 是『帧级二元路由』（简单/困难），adaptive 是『四态状态机 + 稀疏专家』——后者是前者的超集，这也是 Causal-DTP 被降级为叙事的原因。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>思路正确：难度感知路由是融合的正确方向</li>
+<li>教师-学生蒸馏路线为后续留了伏笔（学生模型训练后减少教师调用）</li>
+<li>与 Phase 2 专家路由/反事实路由同源</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>保守路由=教师全调，无速度收益（8.99 FPS 未变）</li>
+<li>Scout 判难度能力未经严格验证</li>
+<li>结果级路由增益有限（报告中明确『留作叙事』）</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">创新实验版：验证了路由框架可行性；需真实学生模型 + 可靠 Scout 才能兑现速度收益。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>scripts/fuse_causal_dtp_erp.py</div>
+<div class="file-item"><span class="tag">📄</span>configs/grt360_balanced.json</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>不替代两套基线；留作答辩叙事与路由研究起点。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

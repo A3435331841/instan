@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ODTrack + Recapture 外挂（判丢 + 球面重捕获） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="active" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge blue">已实测（drop）</span>
+    <span class="badge">系统级外挂 · 可靠性门控</span>
+    <span class="badge blue">⏱ 2026-08-10 ~ 08-14</span>
+  </div>
+  <h1>ODTrack + Recapture 外挂（判丢 + 球面重捕获）</h1>
+  <div class="summary">给 ODTrack 装『判丢 + 全图找回』外挂：ReliabilityGate（多信号融合判丢）+ TemplateMemory + 多切平面重检测。针对 10 条失锁序列设计，目标是救回一半（+0.02~0.04），但 representative 实测 AUC 0.3981 被 drop。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">rep AUC</div><div class="m-value">0.3981</div><div class="m-scope">representative 9（odtrack_recapture）</div></div>
+<div class="metric"><div class="m-name">rep AUC</div><div class="m-value">0.4007</div><div class="m-scope">representative 9（+ft_ep7 变体）</div></div>
+<div class="metric"><div class="m-name">FPS</div><div class="m-value">23.0~23.7</div><div class="m-scope">representative</div></div>
+<div class="metric"><div class="m-name">基线</div><div class="m-value">ODTrack 0.5882 / 130 官方</div><div class="m-scope">大幅回退</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">OdtrackRecaptureTracker（BaseTracker 契约）：ODTrack 逐帧 + ReliabilityGate（C_visual/anchor/motion/scale/geometry 五信号，多信号融合防自信错跟）+ TemplateMemory（门控写入，anchor 永不被覆盖）+ SphericalMultiViewRedetector（redetect_v3，12 视角×3 尺度多模板池）→ LOST 后每 K=5 帧搜索 → VERIFY（分数+anchor 一致性+运动合理）→ REINIT（清空污染记忆）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**判丢公式**（`_reliability`，线性 logit + sigmoid，权重来自离线 60/60 标定）：`logit = w_motion·(C_motion−0.5) + w_scale·(C_scale−0.5) + w_ncc·(C_anchor−0.5) − w_geom·geometry_risk`，`R = 1/(1+e^{−logit})`。四信号：C_motion=预测中心与圆周恒速外推的球面距离归一化；C_scale=框面积 log 变化 vs EMA；C_anchor=预测框 crop 与 anchor 模板的 NCC（归一化 (sim+1)/2）；geometry_risk=极区 |lat|&gt;55° 或 seam 距离 &lt;12%W 的风险项。C_visual（last_pred_iou）实测 Pearson +0.391、判丢区分度 0.747，但因服务器不可用仅有 10 序列证据，权重置 0。**VERIFY 三门槛**：①NCC score ≥ recapture_min_score（0.45）；②候选 crop 与 anchor 归一化相似度 (sim+1)/2 ≥ 0.5（防锁错相似目标；注意原始 NCC 阈值无意义——4K 正常帧原始 NCC 均值仅 ~0.22）；③候选中心与失锁前位置的球面角距离 ≤ motion_max_deg（90°）。**多视角重检测**（redetect_v3 `search`）：6-8 个经度切平面视角（view_centers）→ 每视角 ERP 窗口降采样 2× → highpass 灰度 → 对模板池（anchor + 高可靠短/长记忆）逐尺度（template_scales）算 NCC 响应场 → 亚像素峰值（_subpixel_peak）→ 局部像素映射回 ERP（x 回绕）。**REINIT**：用候选框重新 tracker.initialize（三平铺帧 + 框居中），彻底清空被污染的 dense temporal memory，再 OBSERVE 3 帧防立即失锁。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么方向正确但实测 drop（0.3981）**（结构性归因）：①**重检测器能力不足**——redetect_v3 的全局搜索用 NCC 在 6-8 个切平面视角做模板匹配，但 4K 全景上 NCC 对『外观变化后的目标』召回率低（recapture 的 VERIFY 门槛严格，宁可 LOST）；NCC 模板匹配在失锁场景的失败模式与 NCC 基线同源——外观变化使相关性衰减。②**判丢信号权重证据有限**——C_visual（last_pred_iou）只有 10 序列证据权重置 0，离线代理信号（motion/scale/anchor）在真实失锁瞬间（快速移动、遮挡）易误判，导致过早/过晚进入 LOST。③**每 K=5 帧搜索的预算**——CPU NCC 全局搜索每次 &lt;2s，但失锁期间目标可能已离开所有切平面视角的覆盖（极区/快速横穿）。**为什么这个失败仍有价值**：它证明『判丢+重捕获』的架构思路是对的（360VOT Issue #11 也支持多切平面），失败的是 NCC 这个重检测器——经验直接沉淀进 adaptive_spherical（四态状态机 + 球面运动证据 + 专家预算），并把重检测升级为『稀疏专家探测』而非全图 NCC。**对比**：representative 0.3981 比纯 ODTrack 基线低 20 个点——外挂的误锁/漏找回代价大于救回收益，验证了『宁可不做不可做错』的工程判断。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>方案设计完整：判丢多信号融合（单信号有反例 0004）、VERIFY 防误锁、REINIT 防记忆污染</li>
+<li>last_pred_iou 相关性实测（Pearson +0.391，判丢区分度 0.747）支持信号方向</li>
+<li>『宁可继续 LOST 不可锁错』的诚实边界与 60/60 留出标定纪律</li>
+<li>多切平面重检测（禁直接喂整张 ERP）有 360VOT Issue #11 文献证据</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>representative 实测 0.3981 大幅低于 ODTrack 基线（0.59 量级）——外挂净收益为负</li>
+<li>重捕获 CPU NCC 开销拖慢 FPS（23 vs 纯 ODTrack 29.9）</li>
+<li>server 不可用时置信度信号改用离线代理，标定证据有限</li>
+<li>VERIFY 双模板一致性 v1 未实现，防误锁能力打折</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">失败（drop）。方向正确但实现/标定不成熟：recapture 需要更准的判丢信号与更强的重检测器（如 YOLO-World/SAM2），单纯 NCC 重检测在 4K 全景上召回不足。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>integrations/odtrack/recapture.py</div>
+<div class="file-item"><span class="tag">📄</span>docs/ODTRACK_RECAPTURE_PLAN_ZH.md</div>
+<div class="file-item"><span class="tag">📄</span>panotrack/pipeline/redetect_v3.py</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>representative drop，不投入 full medium。经验沉淀进 Phase 2 的 adaptive_spherical 状态机（NORMAL/SUSPECT/LOST/VERIFY 四态 + 球面运动证据）。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

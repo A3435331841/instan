@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spherical Memory（球面记忆） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="active" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge blue">已实现（配置存在，未进入赛马主线）</span>
+    <span class="badge">全景专项 · 记忆增强</span>
+    <span class="badge blue">⏱ 2026-08 中旬</span>
+  </div>
+  <h1>Spherical Memory（球面记忆）</h1>
+  <div class="summary">自研球面记忆模块（spherical_memory 配置/模型存在：24 通道，模板 64，update_threshold 0.45），用于模板更新与球面状态记忆，作为可选 tracker 接入。未出现在 medium/representative 赛马结果中。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">配置</div><div class="m-value">channels=24, template_size=64</div><div class="m-scope">configs/grt360_spherical_memory.json</div></div>
+<div class="metric"><div class="m-name">状态</div><div class="m-value">未进入赛马主线</div><div class="m-scope">medium/representative 无结果</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">SphericalMemoryTracker：球面状态 + 模板记忆（update_threshold 门控）+ motion_prior。作为 panotrack 原生 tracker 可选接入。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**球面状态表示**（panotrack/models/spherical_memory.py + trackers/spherical_memory.py）：以 24 通道特征（channels=24）编码球面局部区域，template_size=64 的模板特征随帧更新。**门控更新**：update_threshold=0.45——仅当当前匹配质量超过阈值才把新帧外观写入模板记忆，防止被遮挡/形变/相似物污染（与 recapture 的 TemplateMemory 门控思想同源）。**motion_prior**：开启运动先验（球面恒速外推辅助搜索中心），结合 redetect_interval=3 的重检测骨架。**配置路径**（configs/grt360_spherical_memory.json）：patch_size=255, sr_ratio=3.0, sr_min_fov=20.0, lost_score=0.25, lost_psr=3.0, lost_apce=0.5, max_lost_frames=30, hp_sigma=3.0, refine=false。**模型文件**：artifacts/grt360_spherical_memory.pt（合成 + 真实冒烟均通过 load）。**局限**：未进入 medium/representative 赛马主线，无全量验证数据支撑。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么设计方向合理但无数据支撑**（结构性分析）：球面记忆（24 通道球面特征 + 门控模板更新）在理论上有两个正确动机——①ERP 全景的模板更新必须感知球面几何（同一目标在不同经度/纬度外观不同，门控更新避免把旋转后的外观当成污染）；②update_threshold=0.45 的门控防止遮挡/相似物写入记忆（与 recapture 的 TemplateMemory 同源、与 LoRAT 的『模板污染』问题对应）。**为什么没有进入赛马主线**：该方案是 panotrack 原生 tracker（轻量线 numpy/Pillow 依赖面），而赛马主线已切换为 ODTrack/SUTrack/UETrack 等 GPU 学习型跟踪器——其 24 通道手工特征（对比学习型 dense temporal memory）在容量上无法与 ViT 级特征竞争，属于『先验几何 vs 学习表征』路线的落败。**什么场景下它可能有价值**：作为融合中的『几何先验分支』（球面运动一致性 + 门控记忆为判丢提供独立信号），或作为无 GPU 的 CPU 兜底——与 adaptive_spherical 的 SphericalState（球面运动证据）思想同源，后者的实现实际上继承了它的几何洞察。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>球面原生记忆设计与 360 域匹配</li>
+<li>模板门控更新（0.45 阈值）防污染思想与 recapture 的 TemplateMemory 同源</li>
+<li>为答辩提供『自研全景组件』素材</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>无赛马数据支撑（未跑 medium/representative）</li>
+<li>模型 artifact（.pt）未在结果集中体现收益</li>
+<li>与 ODTrack/SUTrack 等主力相比缺验证</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">未验证的探索组件；若 Phase 2 时间允许可作为记忆增强实验对照，否则留作架构叙事。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>panotrack/models/spherical_memory.py</div>
+<div class="file-item"><span class="tag">📄</span>panotrack/trackers/spherical_memory.py</div>
+<div class="file-item"><span class="tag">📄</span>configs/grt360_spherical_memory.json</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>暂缓投入；以 ODTrack/SUTrack 主线的验证结果为准。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

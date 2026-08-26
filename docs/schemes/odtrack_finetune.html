@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="active" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge amber">验证中（组件候选）</span>
+    <span class="badge">域微调 · 训练</span>
+    <span class="badge blue">⏱ 决赛冲刺（2026-08-22 ~）</span>
+  </div>
+  <h1>ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</h1>
+  <div class="summary">用官方 130 序列（train95/valid35 划分，valid 绝不训练）对 ODTrack 微调，产出 ft_ep1-8 与 failure-balanced v4/v5 系列。目标是域自适应，但 medium 30 上无一超越基线的量级突破，作为组件保留。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">AUC</div><div class="m-value">0.4535~0.4817</div><div class="m-scope">medium 30 完整方法（ft_ep6/v4_ep4 等）</div></div>
+<div class="metric"><div class="m-name">SR</div><div class="m-value">0.4962~0.5279</div><div class="m-scope">medium 30</div></div>
+<div class="metric"><div class="m-name">AUC</div><div class="m-value">0.5335~0.5479</div><div class="m-scope">representative 9（ft_ep6/v4_ep4 等 core_keep）</div></div>
+<div class="metric"><div class="m-name">基线</div><div class="m-value">ODTrack 0.5882 / 130 官方</div><div class="m-scope">未超</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">官方数据 train95（19/19/19/19/19 五折 OOF）→ 三平铺样本流 + 随机经度 roll → ODTrack 热启动（LR 1/10, 20 epoch）→ 逐 epoch checkpoint → representative/medium 快评通道。v4/v5 引入 failure-balanced 采样（sampler 读 GRT360_TRAIN_MANIFEST）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**数据管道**：官方 130 序列按 seed 20260824 确定性划分 train95（32 real + 63 sim）/ valid35（15 real + 20 sim）；`make_official_split.py` 产出 split.json + seqlist；`prepare_finetune_data.py` 把 video+BFoV 转成三平铺训练样本流并**按消失段切分子序列**（官方数据有 11% 消失帧 (0,0,0,0)，评测 runner 掩码跳过，训练按消失段切割防止污染）。**训练清单**（`training_manifest.py`）：`build_spherical_training_manifest` 生成 leakage-safe 的 train95 清单，real/sim 采样质量平衡（sim 83 条多为 450/900 帧，real 47 条 ~1600 帧），5 折 OOF（19/19/19/19/19）支撑交叉验证；valid35 在任何清单中排除。**训练配置**（finetune_official.yaml / finetune_spherical_v5.yaml）：PRETRAIN=ODTrack_ep0300.pth.tar 热启动，LR=0.00001（原 0.0001 的 1/10），EPOCH=20，LR_DROP_EPOCH=15，SAMPLE_PER_EPOCH=15000，AMP；v5 用 failure-balanced 采样（sampler 读 GRT360_TRAIN_MANIFEST 的 capped 权重，困难序列更高采样概率），并加随机经度 roll 增强。**依赖补丁**：`torch._six`、visdom 桩、loader 去掉 torch._six 引用（py3.8 时代代码适配 py3.12）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么微调没有突破基线**（结构性归因）：①**数据规模**——train95 只有 95 条序列（32 real + 63 sim），域漂移信息有限；ODTrack 原始训练集（LaSOT/GOT-10k/TrackingNet/COCO）规模大 2-3 个数量级，95 条官方数据不足以撼动预训练权重的主导地位。②**LR 1/10 的保守策略**——热启动 + 低学习率防止灾难性遗忘，但同时也限制了新域特征的吸收速度，20 epoch × 15000 samples/epoch 的预算偏小。③**三平铺输入已是最优适配**——ODTrack 已通过三平铺获得 360 域的大部分收益，微调是在『已经吃饱』的基线上再加菜，边际收益递减。**为什么 ft_v4_ep4/5 在 real 段略好**：failure-balanced 采样（困难序列更高权重）让模型在真实困难序列上更充分训练——real AUC 0.448/0.417 接近 sutrack_b224（0.4435），证明『训练数据平衡策略』方向正确。**为什么 representative 与 medium 不一致**：representative 9 条精选序列（难度均衡）放大了微调 checkpoint 在特定场景的增益；medium 30（更接近真实分布）拉平了差异——这正是项目用 medium 作为最终 gate 的机理。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>建立了无泄漏划分（valid35 永不训练）与五折 OOF 纪律</li>
+<li>failure-balanced v5 是有据可依的训练策略创新</li>
+<li>多个 checkpoint 在 representative 上进入 core_keep（组件价值）</li>
+<li>ft_v4_ep4/5 在 medium real 段 AUC 0.448/0.417 接近 sutrack_b224</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>medium 30 上无任何微调版超过 ODTrack 0.5882 基线</li>
+<li>FPS 普遍 11-16（低于基线 29.9 与 sutrack 26）</li>
+<li>train95 只有 95 条序列，域漂移收益有限</li>
+<li>ft_ep1-4 / v4_ep2/3/6 在 representative 上被 drop</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">域自适应候选；作为融合中的 sim/hard 专家或速度基线 peer；v5 训练仍在进行中（GPU0）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>integrations/odtrack/finetune_spherical_v5.yaml</div>
+<div class="file-item"><span class="tag">📄</span>panotrack/data/training_manifest.py</div>
+<div class="file-item"><span class="tag">📄</span>scripts/prepare_finetune_data.py</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>组件级保留（core_keep 的进融合池，drop 的不投入）；v5 结果待 checkpoint watcher 产出后评估。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

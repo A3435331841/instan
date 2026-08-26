@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>UETrack ERP-wrap（高速基线） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="active" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge blue">保留（高速基线/蒸馏起点）</span>
+    <span class="badge">全景适配 · ERP 环绕</span>
+    <span class="badge blue">⏱ Stage 3（2026-08-09 ~）</span>
+  </div>
+  <h1>UETrack ERP-wrap（高速基线）</h1>
+  <div class="summary">UETrack（统一高效跟踪器）以 ERP-wrap 形式接入（搜索图环绕 padding），120 序列 AUC 0.5143 / 57.16 FPS，速度是 ODTrack 的 6 倍多，是快路径与知识蒸馏学生模型的起点。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">AUC</div><div class="m-value">0.5143</div><div class="m-scope">360VOT 120 序列全量</div></div>
+<div class="metric"><div class="m-name">SR</div><div class="m-value">0.5776</div><div class="m-scope">360VOT 120 序列全量</div></div>
+<div class="metric"><div class="m-name">FPS</div><div class="m-value">57.16</div><div class="m-scope">端到端</div></div>
+<div class="metric"><div class="m-name">FPS</div><div class="m-value">38.5</div><div class="m-scope">medium 30 并发观测</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">UETrack（parameter=uetrack_base, search 224, template 112, moe_experts=8, moe_layer=[5]）+ ERP 环绕 padding（搜索图拼接跨越经度边界）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**UETrack（统一高效跟踪器，2024）**：轻量 transformer 跟踪器，训练时统一 SOT/MOT/DET 多任务数据，推理时单分支输出。**ERP-wrap 适配（本项目）**：`erp_wrap.py` 提供两个替换函数——`sample_target_erp`（水平循环采样：搜索图跨经度边界时用 `np.roll`/循环拼接补齐，而非截断）与 `clip_box_erp`（预测框经度环绕折回 [0,W)）。通过 monkey-patch 替换 `lib.test.tracker.uetrack.sample_target/clip_box` 实现，上游代码零改动。**MoE 配置**：moe_experts=8、moe_layer=[5]，在 transformer 第 5 层引入 8 个专家（mixture-of-experts 稀疏激活），兼顾容量与效率。**模板/搜索尺寸**：template 112×112（template_factor=2.0）、search 224×224（search_factor=4.0），window=True（hann 窗抑制边缘响应）。**评测路径**：run_erp.py 走 UETrack 官方 run_sequence，GRT360_DATA_ROOT/SEQUENCES 环境变量驱动；结果行数与帧数严格校验（不完整即 RuntimeError）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么快（57 FPS）**：UETrack 是轻量 transformer（搜索图仅 224×224 vs ODTrack 的 384 三平铺级输入），加上 MoE 稀疏激活（moe_experts=8, moe_layer=[5]）——每帧只激活少数专家路径，计算量按容量缩放；统一 SOT/MOT/DET 预训练让单分支结构足够紧凑。**为什么 ERP-wrap 不牺牲精度**：`sample_target_erp` 的循环拼接让搜索图跨接缝时内容连续（而非截断丢一半目标），`clip_box_erp` 保证预测框语义正确折回——这与三平铺解决同一问题（接缝），但用『采样时环绕』而非『输入时平铺』，省去 3 倍输入拷贝（也是速度优势的一部分）。**为什么 real 域略强于 sim（0.4627 vs 0.4254）**：统一多任务训练（含真实 MOT/DET 数据）使模型在真实场景统计下更稳健；sim 域（仿真目标、极端运动）超出其训练分布。**为什么精度低于 ODTrack 约 7 点**：①无 dense temporal memory（轻量结构无跨帧 token 累积）；②224 搜索图对 4K 小目标的分辨率不如三平铺 384 输入；③MoE 稀疏化在困难外观上判别力弱于密集 transformer。**定位**：速度-精度 Pareto 前沿的另一端，与 ODTrack 互补而非替代。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>57 FPS 端到端，速度档最强</li>
+<li>精度 0.51 量级可作为融合快路径主干</li>
+<li>代表序列与 medium 均表现稳定（uetrack rep AUC 0.5229 / 51.6 FPS）</li>
+<li>MoE 结构（8 experts）与 Phase 2 专家路由思想同源</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>精度低于 ODTrack 0.58 约 6-7 个点，不足以单独提交</li>
+<li>real 域 AUC 0.4627 高于 sim 0.4254——真实场景泛化尚可但上限有限</li>
+<li>ERP-wrap 仅在搜索图环绕，未处理极区畸变</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">高速实时/低算力场景；融合中的快路径主干；知识蒸馏学生模型起点（grt360_balanced 配置的『学生』）。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>integrations/uetrack/arena_protocol.py</div>
+<div class="file-item"><span class="tag">📄</span>integrations/uetrack/run_erp.py</div>
+<div class="file-item"><span class="tag">📄</span>configs/grt360_fast_uetrack.json</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>保留为高速基线；与 ODTrack 组成『精度-速度』双支柱，供融合与蒸馏使用。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>

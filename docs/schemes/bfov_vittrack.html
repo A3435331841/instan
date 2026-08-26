@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>BFoV + VitTrack（框架漂移验证） · GRT-360 技术方案图谱</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <a class="logo" href="index.html"><span class="dot"></span>GRT-360 技术方案图谱</a>
+  <span class="crumb">影石全景视频智能跟踪赛道</span>
+  <span class="spacer"></span>
+  <span class="badge-top">20 方案 · 2026-08-26</span>
+</header>
+<div class="layout">
+<div class="sidenav"><h4>📚 方案目录</h4>
+<div class="grp">真实跑过</div>
+<a class="" href="ncc_bfov.html">NCC 基线（BFoV 框架）</a>
+<a class="active" href="bfov_vittrack.html">BFoV + VitTrack（框架漂移验证）</a>
+<a class="" href="direct_erp_vittrack.html">Direct ERP + VitTrack（全帧直连）</a>
+<a class="" href="lightfc.html">LightFC ONNX（轻量全帧跟踪器）</a>
+<a class="" href="odtrack_erp3.html">ODTrack ERP 三平铺（初赛提交 · 精度冠军）</a>
+<a class="" href="uetrack_erpwrap.html">UETrack ERP-wrap（高速基线）</a>
+<a class="" href="odtrack_finetune.html">ODTrack 官方数据微调族（ft_ep1-8 / ft_v4_ep1-6）</a>
+<a class="" href="sutrack.html">SUTrack（B224 / T224）</a>
+<a class="" href="lorat.html">LoRAT（B378/L378，LoRA 高效跟踪）</a>
+<a class="" href="odtrack_recapture.html">ODTrack + Recapture 外挂（判丢 + 球面重捕获）</a>
+<a class="" href="fusion_family.html">融合族（fusion_2way ~ 8way）</a>
+<a class="" href="causal_dtp.html">Causal-DTP-ERP（教师-学生路由）</a>
+<a class="" href="adaptive_spherical.html">adaptive_spherical（自适应球面状态机）</a>
+<a class="" href="spherical_memory.html">Spherical Memory（球面记忆）</a>
+<div class="grp">调研候选</div>
+<a class="" href="spmtrack.html">SPMTrack（CVPR 2025，LaSOT 最高可复现）</a>
+<a class="" href="samurai_sam2.html">SAMURAI / SAM2 系（长时跟踪与重捕获）</a>
+<a class="" href="aiatrack360.html">AiATrack-360（公开文献 SOTA 对照）</a>
+<a class="" href="lorat360_official_ft.html">LoRAT-360 官方微调（文献证据）</a>
+<a class="" href="panosam2_omnitrack.html">PanoSAM2 / OmniTrack++（方向借鉴）</a>
+<a class="" href="deploy_accel.html">RTX 5090 部署加速（NVDEC / GPU 预处理 / BF16 / compile）</a>
+</div>
+<main class="main">
+
+<section class="scheme-header">
+  <div class="meta-line">
+    <span class="badge red">已废弃（关键反面教材）</span>
+    <span class="badge">经典方法 · 几何框架 + 学习跟踪器</span>
+    <span class="badge blue">⏱ Stage 2（2026-07-25 前后）</span>
+  </div>
+  <h1>BFoV + VitTrack（框架漂移验证）</h1>
+  <div class="summary">在 BFoV 框架上接入学习型跟踪器 VitTrack（ONNX），验证了『几何框架 + 学习跟踪器』策略对单序列有效（0036: 0.05→0.74），但整体被框架漂移拖垮。</div>
+</section>
+
+<div class="card">
+  <h2><span class="ico">📊</span>关键指标</h2>
+  <div class="metrics"><div class="metric"><div class="m-name">AUC</div><div class="m-value">0.25</div><div class="m-scope">360VOT 6 序列 mean</div></div>
+<div class="metric"><div class="m-name">AUC_dual</div><div class="m-value">0.26</div><div class="m-scope">360VOT 6 序列 mean</div></div>
+<div class="metric"><div class="m-name">SR</div><div class="m-value">0.13</div><div class="m-scope">360VOT 6 序列 mean</div></div>
+<div class="metric"><div class="m-name">FPS</div><div class="m-value">~8</div><div class="m-scope">4K 本地 CPU</div></div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🏗️</span>架构设计</h2>
+  <div class="arch">BFoV 切图（patch 255, sr_ratio 4-6）+ VitTrack 孪生网络（ONNX）+ 状态预测 + 判丢。搜索区裁剪自 360° 全景，FoV ~20°。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🔬</span>技术细节</h2>
+  <div class="arch">**VitTrack（AAAI 2023）**：孪生视觉 Transformer 跟踪器，单目帧间匹配（无需模板更新网络）。ONNX 化后双输入：模板图（127×127）与搜索图（patch_size² 按 sr_ratio 缩放），transformer encoder 融合两分支 token，decoder 直接回归目标框。**BFoV 切图**：以状态预测中心为 BFoV 中心，将 ERP 全景经 gnomonic 投影裁出 patch_size² 局部透视图——目标占切图比例由 sr_ratio 控制（sr_ratio=4 → FoV≈40°，小目标占比 &lt;5%）。**状态预测**：恒定角速度外推 BFoV 中心。**参数搜索**（8 组网格，downscale=0.5, max_frames=50）：patch=255/sr=6.0 最优（AUC 0.241 vs 基线 0.239，仅 +0.8%）；patch=321/sr=4.0 大幅恶化（0.170，-28.9%）。**关键 bug 修复记录**：自适应 patch_size 在 update() 中未生效（改用 getattr(self,&#x27;_adaptive_patch_size&#x27;,...)）；init/update 坐标转换使用不同 patch_size 导致 ERP 坐标错误。超参：template_size=127, lost_score=0.25, lost_psr=3.0, lost_apce=0.5, redetect_interval=3。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🧠</span>机理分析：为什么在长处场景有效</h2>
+  <div class="arch">**为什么单序列（0036）增益 10 倍**：VitTrack 的孪生 transformer 将 NCC 的『像素级模板匹配』升级为『语义级特征匹配』——目标即使发生轻微外观变化，其深度特征仍与模板特征高度相关，这是 0036 序列（目标外观变化、NCC 崩溃）上 0.05→0.74 的结构性原因。**为什么整体仍失败**：增益被 BFoV 框架的两个结构缺陷抵消——①开环状态预测漂移（同 NCC 方案），漂移后切图里根本没有目标，再强的跟踪器也无用；②小目标稀释：255×255 切图（FoV~20°）中 &lt;30px 目标占比 &lt;5%，VitTrack 的搜索区域被背景主导。**参数搜索为何封顶**：patch/sr/lost 只能改变搜索范围与判丢灵敏度，无法修复『预测漂移』与『目标稀释』——这正是网格搜索 8 组仅 +0.8% 的原因。**关键对照实验**（结构归因的铁证）：直接 cv2.TrackerVit 全帧 0.44 &gt; BFoV+VitTrack 0.10——同一跟踪器，去掉框架后精度反超 4 倍，证明瓶颈 100% 在框架不在跟踪器。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">⚖️</span>优缺点</h2>
+  <div class="two-col">
+    <div class="pros"><h3>优点</h3><ul><li>验证了框架+学习型跟踪器的方向（0036 序列 AUC 0.05→0.74，10 倍增益）</li>
+<li>参数搜索结论（patch 255 / sr 6.0 最优）为后续提供参考</li>
+<li>暴露了 BFoV 框架的根本缺陷，促成 Direct ERP 方案</li></ul></div>
+    <div class="cons"><h3>缺点</h3><ul><li>BFoV 恒定角速度状态预测累积误差，frame 7-8 即严重漂移</li>
+<li>小目标（&lt;30px）在 255×255 切图中占比 &lt;5%，孪生网络缺上下文</li>
+<li>整体 mean AUC 0.25 仍远低于 0.45 目标</li>
+<li>参数调优天花板明显：8 组网格搜索最优仅 +0.8%</li></ul></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🎯</span>适用场景</h2>
+  <div class="arch">仅验证用。直接跟踪（无框架）AUC 0.44 &gt; BFoV 框架 0.10，证明框架本身是负资产。</div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">🗂️</span>相关文件</h2>
+  <div class="file-list"><div class="file-item"><span class="tag">📄</span>panotrack/trackers/vittrack_onnx.py</div>
+<div class="file-item"><span class="tag">📄</span>configs/stage2_optimal.json</div></div>
+</div>
+
+<div class="card">
+  <h2><span class="ico">📌</span>结论</h2>
+  <div class="decision"><span class="label">决策 →</span>废弃 BFoV 框架；结论『直接跟踪 &gt; 框架跟踪』直接导向 Direct ERP 与全帧跟踪路线。</div>
+</div>
+
+</main>
+</div>
+<footer class="footer">
+  GRT-360 全景跟踪 · 数据源: docs/schemes/schemes.json（2026-08-26）· 由生成器渲染，改数据后运行 scripts/gen_schemes_html.py 刷新
+</footer>
+</body>
+</html>
