@@ -104,6 +104,13 @@ def main(argv: list[str] | None = None) -> int:
         "excluded_roots": audit.get("excluded_roots", []),
         "no_remote_delete": True,
         "docker_push": False,
+        "docker_offline_syntax_check": True,
+        "local_layout_readme": r"D:\instan\README_LOCAL_LAYOUT.md",
+        "local_reorganization_log": r"D:\instan\grt360_storage\manifests\LOCAL_REORGANIZATION_LOG_20260827.csv",
+        "duplicates_report": r"D:\instan\grt360_storage\manifests\DUPLICATES_BY_SHA256.csv",
+        "release_assets_manifest": r"D:\instan\grt360_storage\manifests\RELEASE_ASSETS_20260827.json",
+        "github_release": {"name": "grt360-server-exit-20260827", "upload_performed": False,
+                           "reason": "current PAT lacks Release API permission (HTTP 403)"},
     }
     (root / "MIGRATION_COMPLETE.json").write_text(json.dumps(complete, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(complete, ensure_ascii=False))
