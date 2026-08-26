@@ -73,18 +73,26 @@ class RemoteSession:
         stdout.channel.settimeout(45.0)
         data = bytearray()
         channel = stdout.channel
+        exit_seen_at = None
         while len(data) < size:
             if channel.recv_ready():
                 data.extend(channel.recv(min(CHUNK, size - len(data))))
+                exit_seen_at = None
                 continue
             if channel.exit_status_ready():
+                # Paramiko can expose the exit status just before the final
+                # stdout packets are visible through recv_ready(). Give the
+                # channel a short drain window before treating this as EOF.
+                if exit_seen_at is None:
+                    exit_seen_at = time.monotonic()
+                if time.monotonic() - exit_seen_at < 2.0:
+                    time.sleep(0.02)
+                    continue
                 break
             time.sleep(0.01)
         error = stderr.read().decode("utf-8", "replace").strip()
         if error:
             raise RuntimeError(f"remote block read failed for {path}: {error}")
-        if len(data) != size:
-            raise RuntimeError(f"remote block short read for {path}: {len(data)}/{size}")
         return bytes(data)
 
 
@@ -228,9 +236,17 @@ def sync_file(session: RemoteSession, remote_file: str, local_file: Path,
                     if offset + request_size > expected_size:
                         request_size = expected_size - offset
                     data = session.read_block(remote_file, offset, request_size)
-                    target.write(data[:size])
-                    offset += size
+                    if not data:
+                        raise RuntimeError(f"remote block empty read for {remote_file} at {offset}")
+                    is_final = offset + size >= expected_size
+                    write_size = len(data) if is_final else (len(data) // (1024 * 1024)) * (1024 * 1024)
+                    if write_size <= 0:
+                        raise RuntimeError(f"remote block made no aligned progress for {remote_file} at {offset}")
+                    target.write(data[:write_size])
+                    offset += write_size
                     target.flush()
+                    if len(data) < request_size and offset < expected_size:
+                        session.reset()
                     attempts = 0
                 except (OSError, EOFError, RuntimeError, socket.timeout):
                     attempts += 1
@@ -277,7 +293,7 @@ def main(argv=None):
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
-    specs = default_specs(root)
+    specs = default_specs(root) if args.only or not args.top_level else []
     if args.only:
         specs = [spec for spec in specs if any(spec.remote.startswith(prefix) for prefix in args.only)]
     for remote_root in args.top_level:
