@@ -229,8 +229,10 @@ def download_one(session: Session, remote: str, target: Path, size: int, remote_
         if local_hash(target) == remote_digest:
             return "verified_existing"
         conflict = target.with_name(target.name + ".conflict")
-        if conflict.exists():
-            conflict.unlink()
+        suffix = 1
+        while conflict.exists():
+            conflict = target.with_name(target.name + f".conflict.{suffix}")
+            suffix += 1
         target.replace(conflict)
 
     partial = target.with_name(target.name + ".partial")
