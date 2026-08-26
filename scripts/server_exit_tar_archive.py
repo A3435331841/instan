@@ -50,9 +50,10 @@ def digest(path: Path) -> str:
     return h.hexdigest()
 
 
-def remote_hashes(client: paramiko.SSHClient, remote_root: str) -> dict[str, str]:
+def remote_hashes(client: paramiko.SSHClient, remote_root: str, top_level: bool = False) -> dict[str, str]:
     qroot = shlex.quote(remote_root)
-    command = f"find {qroot} -type f -print0 | xargs -0 -r sha256sum"
+    depth = "-maxdepth 1 " if top_level else ""
+    command = f"find {qroot} {depth}-type f -print0 | xargs -0 -r sha256sum"
     _, stdout, stderr = client.exec_command(command, timeout=1800)
     text = stdout.read().decode("utf-8", "surrogateescape")
     error = stderr.read().decode("utf-8", "replace").strip()
@@ -99,7 +100,7 @@ def verify_tree(root: Path, remote_root: str, hashes: dict[str, str]) -> tuple[i
 
 
 def archive_one(client: paramiko.SSHClient, remote_root: str, local_root: Path,
-                staging: Path, record: dict) -> None:
+                staging: Path, record: dict, top_level: bool = False) -> None:
     sftp = client.open_sftp()
     base = posixpath.basename(remote_root.rstrip("/")) or "root"
     remote_tar = f"/tmp/grt360_server_exit_{base}_20260827.tar"
@@ -107,7 +108,12 @@ def archive_one(client: paramiko.SSHClient, remote_root: str, local_root: Path,
     local_root.mkdir(parents=True, exist_ok=True)
     staging.mkdir(parents=True, exist_ok=True)
     qtar, qroot = shlex.quote(remote_tar), shlex.quote(remote_root)
-    _, out, err = client.exec_command(f"tar -cf {qtar} -C {qroot} .", timeout=1800)
+    if top_level:
+        command = (f"find {qroot} -maxdepth 1 -type f -printf '%f\\0' | "
+                   f"tar --null -cf {qtar} -C {qroot} -T -")
+    else:
+        command = f"tar -cf {qtar} -C {qroot} ."
+    _, out, err = client.exec_command(command, timeout=1800)
     out.read()
     error = err.read().decode("utf-8", "replace").strip()
     if error:
@@ -124,7 +130,7 @@ def archive_one(client: paramiko.SSHClient, remote_root: str, local_root: Path,
         local_tar.with_name(local_tar.name + ".partial").replace(local_tar)
     if local_tar.stat().st_size != remote_size or digest(local_tar) != remote_digest:
         raise RuntimeError(f"archive SHA256 mismatch for {remote_root}")
-    hashes = remote_hashes(client, remote_root)
+    hashes = remote_hashes(client, remote_root, top_level=top_level)
     extracted = safe_extract(local_tar, local_root)
     checked = mismatches = 0
     for remote_file, expected in hashes.items():
@@ -152,6 +158,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--spec", action="append", required=True,
                         help="remote path=local relative path (repeatable)")
     parser.add_argument("--manifest-name", default="tar_archive_manifest.json")
+    parser.add_argument("--top-level-control", action="store_true",
+                        help="archive only regular files directly under /data")
     args = parser.parse_args(argv)
     root = Path(args.root).resolve()
     staging = root / ".tar_staging"
@@ -165,7 +173,8 @@ def main(argv: list[str] | None = None) -> int:
             remote, local_rel = item.split("=", 1)
             print(f"[tar] {remote} -> {local_rel}", flush=True)
             record: dict = {"remote_root": remote, "local_root": str(root / local_rel)}
-            archive_one(client, remote, root / local_rel, staging, record)
+            archive_one(client, remote, root / local_rel, staging, record,
+                        top_level=args.top_level_control and remote.rstrip("/") == "/data")
             records.append(record)
             (root / args.manifest_name).write_text(
                 json.dumps({"started": started, "records": records}, ensure_ascii=False, indent=2),
