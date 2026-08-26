@@ -120,6 +120,58 @@ class Session:
             raise RuntimeError(f"remote SHA256 failed for {remote}: {error or 'empty output'}")
         return value[0].lower()
 
+    def remote_hashes(self, root: str, top_level: bool = False) -> dict[str, str]:
+        """Compute a whole-tree SHA256 index in one remote shell call."""
+        if self.client is None:
+            raise RuntimeError("SSH session is not connected")
+        quoted = "'" + root.replace("'", "'\\''") + "'"
+        depth = "-maxdepth 1 " if top_level else ""
+        command = f"find {quoted} {depth}-type f -print0 | xargs -0 -r sha256sum"
+        _, stdout, stderr = self.client.exec_command(command, timeout=1800)
+        raw = stdout.read().decode("utf-8", "surrogateescape")
+        error = stderr.read().decode("utf-8", "replace").strip()
+        if error:
+            raise RuntimeError(f"remote SHA256 index failed for {root}: {error}")
+        hashes: dict[str, str] = {}
+        for line in raw.splitlines():
+            if len(line) < 66:
+                continue
+            digest, name = line[:64].lower(), line[66:]
+            if len(digest) == 64 and name:
+                hashes[name] = digest
+        return hashes
+
+    def remote_files(self, root: str, top_level: bool = False) -> list[tuple[str, int, float]]:
+        """Ask the remote shell for an index instead of recursively listing SFTP.
+
+        The provider used for this machine occasionally stalls on a large
+        SFTP ``OPENDIR`` response even though ordinary file reads work.  The
+        remote ``find`` index is small, deterministic, and avoids that failure
+        mode.  Names are emitted as a NUL-delimited stream so spaces are safe.
+        """
+        if self.client is None:
+            raise RuntimeError("SSH session is not connected")
+        quoted = "'" + root.replace("'", "'\\''") + "'"
+        depth = "-maxdepth 1 " if top_level else ""
+        command = (
+            "find " + quoted + " " + depth + "-type f -printf '%p\\t%s\\t%T@\\0'"
+        )
+        _, stdout, stderr = self.client.exec_command(command, timeout=300)
+        raw = stdout.read()
+        error = stderr.read().decode("utf-8", "replace").strip()
+        if error:
+            raise RuntimeError(f"remote file index failed for {root}: {error}")
+        records: list[tuple[str, int, float]] = []
+        for item in raw.split(b"\0"):
+            if not item:
+                continue
+            try:
+                name, size, mtime = item.decode("utf-8", "surrogateescape").split("\t")
+                records.append((name, int(size), float(mtime)))
+            except (ValueError, UnicodeDecodeError) as exc:
+                raise RuntimeError(f"malformed remote file index entry for {root}") from exc
+        return records
+
 
 def local_hash(path: Path) -> str:
     digest = hashlib.sha256()
@@ -164,7 +216,14 @@ def relative_to(remote_root: str, remote_file: str) -> str:
 
 
 def download_one(session: Session, remote: str, target: Path, size: int, remote_digest: str) -> str:
-    """Download one file, reopening the SFTP channel at bounded intervals."""
+    """Download one file through Paramiko's pipelined SFTP getter.
+
+    This endpoint has exhibited stalled ``SFTPFile.read`` calls, while
+    Paramiko's built-in ``get`` (which enables read-ahead/prefetch) is stable.
+    A failed attempt leaves the partial file in place for inspection; the next
+    attempt restarts that individual file from byte zero rather than risking a
+    hole or duplicate append.
+    """
     target.parent.mkdir(parents=True, exist_ok=True)
     if target.is_file() and target.stat().st_size == size:
         if local_hash(target) == remote_digest:
@@ -179,28 +238,12 @@ def download_one(session: Session, remote: str, target: Path, size: int, remote_
         partial.unlink()
     attempts = 0
     while True:
-        offset = partial.stat().st_size if partial.exists() else 0
-        if offset >= size:
-            break
         try:
-            sftp = session.require_sftp()
-            remote_handle = sftp.open(remote, "rb")
-            remote_handle.seek(offset)
-            with partial.open("ab") as local_handle:
-                since_reopen = 0
-                while offset < size:
-                    want = min(READ_BYTES, size - offset)
-                    chunk = remote_handle.read(want)
-                    if not chunk:
-                        raise EOFError(f"short SFTP read at {offset}/{size} for {remote}")
-                    local_handle.write(chunk)
-                    local_handle.flush()
-                    offset += len(chunk)
-                    since_reopen += len(chunk)
-                    if since_reopen >= REOPEN_BYTES and offset < size:
-                        break
-            remote_handle.close()
-            attempts = 0
+            # SFTPClient.get uses pipelined reads.  It truncates the partial
+            # destination at the start of each attempt, so a retry cannot
+            # duplicate bytes from a previous failed attempt.
+            session.require_sftp().get(remote, str(partial), prefetch=True)
+            break
         except (OSError, EOFError, paramiko.SSHException, socket.timeout) as exc:
             attempts += 1
             if attempts > 5:
@@ -244,44 +287,46 @@ def main(argv: list[str] | None = None) -> int:
     records: list[dict] = []
     with Session() as session:
         for spec in specs:
-            sftp = session.require_sftp()
             try:
-                files = list(walk_files(sftp, spec.remote))
-            except OSError as exc:
+                files = session.remote_files(spec.remote)
+            except (OSError, paramiko.SSHException) as exc:
                 print(f"skip unavailable root {spec.remote}: {exc}", flush=True)
                 continue
             total = sum(size for _, size, _ in files)
             print(f"[{spec.kind}] {spec.remote}: {len(files)} files, {total / 1e9:.2f} GB", flush=True)
+            hashes = {} if args.dry_run else session.remote_hashes(spec.remote)
             for remote, size, mtime in files:
                 local = root / spec.local / Path(*relative_to(spec.remote, remote).split("/"))
                 record = {"kind": spec.kind, "remote": remote, "local": str(local), "size": size, "mtime": mtime}
                 if args.dry_run:
                     record.update({"sha256": "", "status": "dry_run", "checked_at": ""})
                 else:
-                    digest = session.remote_hash(remote)
+                    digest = hashes.get(remote) or session.remote_hash(remote)
                     status = download_one(session, remote, local, size, digest)
                     record.update({"sha256": digest, "status": status,
                                    "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
                     print(f"  {status}: {relative_to(spec.remote, remote)} ({size / 1e9:.2f} GB)", flush=True)
                 records.append(record)
-                write_manifest(root, records, started, args.manifest_name)
+                if not args.dry_run and len(records) % 20 == 0:
+                    write_manifest(root, records, started, args.manifest_name)
         if args.top_level:
-            sftp = session.require_sftp()
-            files = list(walk_top_level(sftp, "/data"))
+            files = session.remote_files("/data", top_level=True)
             print(f"[control] /data: {len(files)} files", flush=True)
+            hashes = {} if args.dry_run else session.remote_hashes("/data", top_level=True)
             for remote, size, mtime in files:
                 local = root / "server_control" / "top_level" / Path(posixpath.basename(remote))
                 record = {"kind": "control", "remote": remote, "local": str(local), "size": size, "mtime": mtime}
                 if args.dry_run:
                     record.update({"sha256": "", "status": "dry_run", "checked_at": ""})
                 else:
-                    digest = session.remote_hash(remote)
+                    digest = hashes.get(remote) or session.remote_hash(remote)
                     status = download_one(session, remote, local, size, digest)
                     record.update({"sha256": digest, "status": status,
                                    "checked_at": time.strftime("%Y-%m-%dT%H:%M:%S%z")})
                     print(f"  {status}: {posixpath.basename(remote)} ({size / 1e6:.1f} MB)", flush=True)
                 records.append(record)
-                write_manifest(root, records, started, args.manifest_name)
+                if not args.dry_run and len(records) % 20 == 0:
+                    write_manifest(root, records, started, args.manifest_name)
     write_manifest(root, records, started, args.manifest_name)
     print(f"manifest={root / args.manifest_name}")
     print(f"files={len(records)}")
