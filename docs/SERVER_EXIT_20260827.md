@@ -42,6 +42,20 @@ D:\instan\grt360_storage\experiments\server_exit_20260827\
 
 `server_exit_manifest.json`记录 36 个逐文件校验资产和 7 个逐树 tar 校验资产；远端审计库存为 16,005 项、哈希 16,002 项。`traindata`、`finetune` 和 venv 按计划排除，并在审计清单中保留大小与原因。
 
+已完成的传输通道为：
+
+- `sftp_p0_manifest.json`：LoRA ep1–ep5 与 v5 ep1–ep6（12 个文件，逐文件 SHA256）。
+- `sftp_p1_checkpoints_weights_manifest.json`：v3/v4 谱系与 8 个独立权重（24 个文件，逐文件 SHA256）。
+- `tar_p2_manifest.json`：runs（9,016 文件）、pano360 运行工作区（3,637 文件）、wheels（2 个文件），tar 与展开后逐文件核对。
+- `tar_sources_manifest.json`：UETrack、SUTrack、LoRAT 三套上游源码，逐文件核对。
+- `tar_control_manifest_retry.json`：服务器 `/data` 顶层 233 个控制文件；其中一个历史文件名含 CR，已映射为 `_U0D_`，内容未丢失。
+
+服务器退出前的最后状态是两块 RTX 3090 均 0% 利用率、15MiB 显存占用，训练/评估调度器已停止；服务器文件未删除。完整本地重复报告位于
+`D:\instan\grt360_storage\manifests\DUPLICATES_BY_SHA256.csv`，只用于人工决策，不代表可自动删除。
+
+Release 资产的 9 个候选文件和 SHA256 已预备在
+`D:\instan\grt360_storage\manifests\RELEASE_ASSETS_20260827.json`；当前 PAT 创建 Release 返回 HTTP 403，故只创建了代码快照 tag `grt360-server-exit-20260827`，未绕过权限上传二进制。
+
 ## 恢复顺序
 
 1. 克隆本仓库并阅读 `artifacts_manifest/RESTORE.md`。
