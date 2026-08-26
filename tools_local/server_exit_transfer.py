@@ -22,8 +22,8 @@ import paramiko
 
 
 CHUNK = 1 * 1024 * 1024
-REOPEN_BYTES = 256 * 1024 * 1024
-EXEC_BLOCK_BYTES = 64 * 1024 * 1024
+REOPEN_BYTES = 16 * 1024 * 1024
+EXEC_BLOCK_BYTES = 16 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -70,13 +70,16 @@ class RemoteSession:
         command = ("dd if='{}' bs=1048576 skip={} count={} iflag=fullblock status=none 2>/dev/null"
                    .format(path.replace("'", "'\\''"), offset // unit, count))
         _, stdout, stderr = self.client.exec_command(command, timeout=90)
-        stdout.channel.settimeout(60.0)
+        stdout.channel.settimeout(45.0)
         data = bytearray()
+        channel = stdout.channel
         while len(data) < size:
-            chunk = stdout.read(min(CHUNK, size - len(data)))
-            if not chunk:
+            if channel.recv_ready():
+                data.extend(channel.recv(min(CHUNK, size - len(data))))
+                continue
+            if channel.exit_status_ready():
                 break
-            data.extend(chunk)
+            time.sleep(0.01)
         error = stderr.read().decode("utf-8", "replace").strip()
         if error:
             raise RuntimeError(f"remote block read failed for {path}: {error}")
