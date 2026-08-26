@@ -1,0 +1,19 @@
+{
+  "tracker": "sutrack",
+  "n_sequences": 130,
+  "auc": 0.6113309732839772,
+  "sr": 0.7222535911748655,
+  "auc_dual": 0.6247287094282731,
+  "sr_dual": 0.7355952819963243,
+  "fps": 28.878109033779953,
+  "tracker_fps": 28.878109033779953,
+  "e2e_fps": 27.793264805398934,
+  "tracker_latency_p50_ms": 34.75950336858379,
+  "tracker_latency_p95_ms": 40.14151390427567,
+  "e2e_latency_p50_ms": 36.103165677811305,
+  "e2e_latency_p95_ms": 41.671056879567914,
+  "decode_latency_mean_ms": 1.342440699322569,
+  "expert_calls_total": 0,
+  "expert_call_fraction": 0.0,
+  "n_gt_absent_total": 30803
+}
