@@ -209,6 +209,9 @@ def build_sutrack_tracker(args):
     import os
     import sys as _sys
 
+    # 在 chdir 前保存 tools_local 绝对路径（LoRA 注入需要）
+    _TOOLS_DIR = str(Path(os.path.abspath(__file__)).parent.parent / "tools_local")
+
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", str(args.gpu))
     workspace = Path(args.sutrack_workspace).resolve()
     if not workspace.is_dir():
@@ -248,6 +251,26 @@ def build_sutrack_tracker(args):
     class SUTrackAdapter:
         def __init__(self):
             self.tracker = SUTRACK(params, "got10k")
+            # 如果指定了 LoRA checkpoint，注入 LoRA 并加载权重
+            if getattr(args, 'sutrack_lora_ckpt', None):
+                import torch as _torch
+                lora_path = Path(args.sutrack_lora_ckpt).resolve()
+                if lora_path.is_file():
+                    # 注入 LoRA
+                    if _TOOLS_DIR not in _sys.path:
+                        _sys.path.insert(0, _TOOLS_DIR)
+                    import sutrack_lora_setup as _lora_mod
+                    apply_lora_to_sutrack = _lora_mod.apply_lora_to_sutrack
+                    n = apply_lora_to_sutrack(self.tracker.network.encoder.body, rank=8, alpha=16.0)
+                    print(f'[sutrack] injected LoRA into {n} layers')
+                    # 加载 LoRA checkpoint
+                    lora_ckpt = _torch.load(str(lora_path), map_location="cpu", weights_only=False)
+                    lora_state = lora_ckpt.get("net", lora_ckpt)
+                    if hasattr(lora_state, "state_dict"):
+                        lora_state = lora_state.state_dict()
+                    missing, unexpected = self.tracker.network.load_state_dict(lora_state, strict=False)
+                    print(f'[sutrack] loaded LoRA ckpt: missing={len(missing)}, unexpected={len(unexpected)}')
+                    self.tracker.network.cuda()
             self.width = None
 
         def init(self, frame_rgb, erp_box, **_):
@@ -978,6 +1001,8 @@ def main(argv=None):
                     help="use CUDA FP16 autocast for SUTrack inference (default: on)")
     ap.add_argument("--no-sutrack-amp", dest="sutrack_amp", action="store_false",
                     help="disable CUDA FP16 autocast for SUTrack")
+    ap.add_argument("--sutrack-lora-ckpt", default=None,
+                    help="LoRA checkpoint to inject into SUTrack (merged with base ckpt)")
     # LoRAT 专用
     ap.add_argument("--lorat-workspace", default="/opt/lorat")
     ap.add_argument("--lorat-ckpt", default="/opt/models/lorat_base.bin")
