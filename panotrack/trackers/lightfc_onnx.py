@@ -8,6 +8,7 @@
 满足 Docker 断网自包含 + 仅 numpy/Pillow/scipy+onnxruntime 约束。
 输入为全帧 ERP(等距柱状),自动处理 360° 跨界(搜索区裁剪水平回绕)。
 """
+import os
 from pathlib import Path
 
 import numpy as np
@@ -77,6 +78,10 @@ class LightFCONNX(BaseTracker):
         sess_options = ort.SessionOptions()
         sess_options.enable_cpu_mem_arena = False
         sess_options.enable_mem_pattern = False
+        num_threads = int(os.environ.get('ORT_NUM_THREADS', '1'))
+        if num_threads > 0:
+            sess_options.intra_op_num_threads = num_threads
+            sess_options.inter_op_num_threads = 1
         self._sess_b = ort.InferenceSession(self.backbone_path,
                                             sess_options=sess_options,
                                             providers=providers)

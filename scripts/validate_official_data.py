@@ -10,11 +10,12 @@
 """
 import argparse
 import json
+import os
 from pathlib import Path
 
 import cv2
 
-ROOT = Path(r"D:\instan\初赛数据\train")
+ROOT = Path(os.environ.get("OFFICIAL_TRAIN_ROOT", r"D:\instan\初赛数据\train"))
 OUT = Path(__file__).resolve().parents[1] / "data360" / "official_split" / "data_issues.json"
 
 

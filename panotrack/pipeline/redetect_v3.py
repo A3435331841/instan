@@ -123,7 +123,7 @@ class SphericalMultiViewRedetector:
                     py_f, px_f, _ = _subpixel_peak(resp, py, px)
                     # 局部像素 -> ERP 像素（x 回绕）
                     x = (x0 + px_f * ww / sw) % W
-                    y = (y0 or 0) + py_f * H / sh
+                    y = (y0 or 0) + py_f * wh / sh
                     out_w = ow * tscale
                     out_h = oh * tscale
                     if best is None or score > best[0]:

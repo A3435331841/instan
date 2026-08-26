@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import os
 import sys
 
 import numpy as np
@@ -77,11 +78,16 @@ class VitTrackONNX(BaseTracker):
         if not loaded:
             try:
                 import onnxruntime as ort
+                sess_options = ort.SessionOptions()
+                num_threads = int(os.environ.get('ORT_NUM_THREADS', '1'))
+                if num_threads > 0:
+                    sess_options.intra_op_num_threads = num_threads
+                    sess_options.inter_op_num_threads = 1
                 providers = ['CPUExecutionProvider']
                 if self.backend == 'cuda':
                     providers = ['CUDAExecutionProvider', 'CPUExecutionProvider']
                 self._sess = ort.InferenceSession(
-                    self.model_path, providers=providers
+                    self.model_path, sess_options=sess_options, providers=providers
                 )
                 self._onnx = True
                 loaded = True
