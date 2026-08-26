@@ -26,8 +26,16 @@ function Assert-SafePath([string]$Path) {
 function Add-Action([string]$Source, [string]$Destination, [string]$Kind, [bool]$Junction) {
     $sourceFull = Assert-SafePath $Source
     $destinationFull = Assert-SafePath $Destination
+    $alreadyMigrated = $false
+    if (Test-Path -LiteralPath $sourceFull) {
+        $sourceItem = Get-Item -LiteralPath $sourceFull -Force
+        if ($sourceItem.LinkType -eq 'Junction' -and
+            ([IO.Path]::GetFullPath([string]$sourceItem.Target).TrimEnd('\') -ieq $destinationFull)) {
+            $alreadyMigrated = $true
+        }
+    }
     $destinationOccupied = $false
-    if (Test-Path -LiteralPath $destinationFull) {
+    if ((-not $alreadyMigrated) -and (Test-Path -LiteralPath $destinationFull)) {
         $destinationItem = Get-Item -LiteralPath $destinationFull
         $destinationOccupied = (-not $destinationItem.PSIsContainer) -or
             ($null -ne (Get-ChildItem -LiteralPath $destinationFull -Force | Select-Object -First 1))
@@ -35,7 +43,7 @@ function Add-Action([string]$Source, [string]$Destination, [string]$Kind, [bool]
     $script:Actions += [pscustomobject]@{
         source = $sourceFull; destination = $destinationFull; kind = $Kind
         junction = $Junction; source_exists = (Test-Path -LiteralPath $sourceFull)
-        destination_exists = $destinationOccupied
+        destination_exists = $destinationOccupied; already_migrated = $alreadyMigrated
     }
 }
 
@@ -56,6 +64,9 @@ function Move-WithJunction([string]$Source, [string]$Destination, [string]$Kind)
     $sourceFull = Assert-SafePath $Source
     $destinationFull = Assert-SafePath $Destination
     if (-not (Test-Path -LiteralPath $sourceFull)) { return }
+    $sourceItem = Get-Item -LiteralPath $sourceFull -Force
+    if ($sourceItem.LinkType -eq 'Junction' -and
+        ([IO.Path]::GetFullPath([string]$sourceItem.Target).TrimEnd('\') -ieq $destinationFull)) { return }
     if (Test-Path -LiteralPath $destinationFull) { Move-EmptySkeleton $destinationFull }
     $parent = Split-Path -Parent $destinationFull
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
@@ -68,6 +79,12 @@ function Move-Only([string]$Source, [string]$Destination, [string]$Kind) {
     $sourceFull = Assert-SafePath $Source
     $destinationFull = Assert-SafePath $Destination
     if (-not (Test-Path -LiteralPath $sourceFull)) { return }
+    if ($Kind -eq 'codex_temp' -and (Test-Path -LiteralPath $destinationFull)) {
+        $sourceItem = Get-Item -LiteralPath $sourceFull -Force
+        if ($sourceItem.PSIsContainer -and $null -eq (Get-ChildItem -LiteralPath $sourceFull -Force | Select-Object -First 1)) {
+            return
+        }
+    }
     if (Test-Path -LiteralPath $destinationFull) { Move-EmptySkeleton $destinationFull }
     $parent = Split-Path -Parent $destinationFull
     New-Item -ItemType Directory -Force -Path $parent | Out-Null
@@ -86,6 +103,17 @@ Add-Action (Join-Path $Root 'external') (Join-Path $Storage 'upstream_sources\le
 foreach ($name in @('downloads','smoke_dataset','smoke_dataset2','smoke_result','_docx_media','_docx_render','graphify-out','handoff_read_20260810','project')) {
     Add-Action (Join-Path $Root $name) (Join-Path $Root "grt360_scratch\$name") 'scratch' $false
 }
+
+# Loose root documents/media are kept, but moved out of the workspace root.
+foreach ($name in @('比赛策略_影石全景跟踪赛道.docx','比赛策略_影石全景跟踪赛道.md','全景视频智能跟踪赛道 (7.13更新).docx','_transcript_read.txt')) {
+    Add-Action (Join-Path $Root $name) (Join-Path $Root ('grt360_deliverables\reference_docs\' + $name)) 'reference_doc' $false
+}
+foreach ($name in @('airsim_index.html','modlens_test.png','cockpit-provider-model-catalog.json','imagenet_classes.txt')) {
+    Add-Action (Join-Path $Root $name) (Join-Path $Root "grt360_scratch\misc\$name") 'misc' $false
+}
+Add-Action (Join-Path $Root 'archive_listing.txt') (Join-Path $Storage 'manifests\archive_listing_20260827.txt') 'audit_snapshot' $false
+Add-Action (Join-Path $Root '.qa_grt360_appendix_20260809') (Join-Path $Root 'grt360_deliverables\legacy_20260809') 'qa_archive' $false
+Add-Action (Join-Path $Root 'tools_local') (Join-Path $Storage 'experiments\local_legacy_202608\tools_local') 'root_tools' $true
 
 # Ignored repository payloads: move them out of the Git working tree but keep
 # the old paths as Junctions so existing scripts remain runnable.
@@ -128,7 +156,13 @@ $inventory | Export-Csv -LiteralPath $InventoryPath -NoTypeInformation -Encoding
 # Never move a path with unresolved conflicts.  The only deletion-like action
 # in this script is creating an empty replacement directory for .codex_tmp.
 foreach ($action in $Actions) {
-    if ($action.destination_exists) {
+    $emptyCodexSource = $false
+    if ($action.kind -eq 'codex_temp' -and $action.source_exists) {
+        $sourceItem = Get-Item -LiteralPath $action.source -Force
+        $emptyCodexSource = $sourceItem.PSIsContainer -and
+            ($null -eq (Get-ChildItem -LiteralPath $action.source -Force | Select-Object -First 1))
+    }
+    if ($action.destination_exists -and $action.source_exists -and -not $action.already_migrated -and -not $emptyCodexSource) {
         throw "Preflight conflict at destination: $($action.destination)"
     }
 }
@@ -141,6 +175,16 @@ Move-WithJunction (Join-Path $Root 'external') (Join-Path $Storage 'upstream_sou
 foreach ($name in @('downloads','smoke_dataset','smoke_dataset2','smoke_result','_docx_media','_docx_render','graphify-out','handoff_read_20260810','project')) {
     Move-Only (Join-Path $Root $name) (Join-Path $Root "grt360_scratch\$name") 'scratch'
 }
+
+foreach ($name in @('比赛策略_影石全景跟踪赛道.docx','比赛策略_影石全景跟踪赛道.md','全景视频智能跟踪赛道 (7.13更新).docx','_transcript_read.txt')) {
+    Move-Only (Join-Path $Root $name) (Join-Path $Root ('grt360_deliverables\reference_docs\' + $name)) 'reference_doc'
+}
+foreach ($name in @('airsim_index.html','modlens_test.png','cockpit-provider-model-catalog.json','imagenet_classes.txt')) {
+    Move-Only (Join-Path $Root $name) (Join-Path $Root "grt360_scratch\misc\$name") 'misc'
+}
+Move-Only (Join-Path $Root 'archive_listing.txt') (Join-Path $Storage 'manifests\archive_listing_20260827.txt') 'audit_snapshot'
+Move-Only (Join-Path $Root '.qa_grt360_appendix_20260809') (Join-Path $Root 'grt360_deliverables\legacy_20260809') 'qa_archive'
+Move-WithJunction (Join-Path $Root 'tools_local') (Join-Path $Storage 'experiments\local_legacy_202608\tools_local') 'root_tools'
 
 Move-WithJunction (Join-Path $Repo 'artifacts') (Join-Path $Storage 'experiments\legacy_artifacts') 'repo_artifacts'
 Move-WithJunction (Join-Path $Repo 'tools_local\uetrack_docker') (Join-Path $Storage 'docker_images\uetrack_context') 'docker_context'

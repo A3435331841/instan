@@ -17,11 +17,15 @@ $env:GRT360_EXPERIMENT_ROOT = 'D:\instan\grt360_storage\experiments'
 在本地归档根目录执行：
 
 ```powershell
-Import-Csv .\SHA256SUMS.csv | ForEach-Object {
+Import-Csv .\SHA256SUMS.csv | Where-Object { $_.type -eq 'file' -or -not $_.type } | Where-Object { $_.local } | ForEach-Object {
   $actual = (Get-FileHash -LiteralPath $_.local -Algorithm SHA256).Hash.ToLowerInvariant()
   if ($actual -ne $_.sha256) { throw "SHA256 mismatch: $($_.local)" }
 }
 ```
+
+`server_exit_manifest.json`中的`tree_archives`记录高文件数目录的tar包哈希；
+`remote_SHA256SUMS`是远端归档树的逐文件哈希清单。若需要重新核对树目录，
+先验证对应 `.tar`，再按 `tar_*_manifest.json`中的`file_count`检查展开结果。
 
 ## 最小恢复验证
 
