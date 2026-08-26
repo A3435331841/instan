@@ -48,6 +48,8 @@ def main(argv: list[str] | None = None) -> int:
     roots = [Path(item).resolve() for item in args.roots] if args.roots else [
         Path(r"D:\instan\grt360_storage\experiments\server_exit_20260827"),
         Path(r"D:\instan\grt360_storage\experiments\legacy_artifacts"),
+        Path(r"D:\instan\grt360_storage\experiments\local_legacy_202608"),
+        Path(r"D:\instan\grt360_storage\docker_images"),
         Path(r"D:\instan\grt360_storage\datasets\360vot_legacy"),
         Path(r"D:\instan\grt360_deliverables"),
     ]
