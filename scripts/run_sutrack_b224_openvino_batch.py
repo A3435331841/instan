@@ -72,6 +72,12 @@ def make_parser():
     ap.add_argument("--anchor-update-threshold", type=float, default=None)
     ap.add_argument("--auto-freeze-scale-threshold", type=float, default=None)
     ap.add_argument("--auto-freeze-scale-window", type=int, default=40)
+    ap.add_argument("--auto-freeze-quality-slope", type=float, default=None)
+    ap.add_argument("--auto-freeze-scale-step-p95", type=float, default=None)
+    ap.add_argument("--auto-freeze-quality-floor", type=float, default=0.75)
+    ap.add_argument("--auto-freeze-scale-step-median-max", type=float, default=0.018)
+    ap.add_argument("--auto-freeze-scale-step-override", type=float, default=None)
+    ap.add_argument("--auto-freeze-max-frame", type=int, default=None)
     ap.add_argument("--seam-recenter", action="store_true")
     ap.add_argument("--polar-rectify", action="store_true")
     ap.add_argument("--polar-latitude-threshold", type=float, default=55.0)
@@ -136,6 +142,12 @@ def main(argv=None):
                     anchor_update_threshold=args.anchor_update_threshold,
                     auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
                     auto_freeze_scale_window=args.auto_freeze_scale_window,
+                    auto_freeze_quality_slope=args.auto_freeze_quality_slope,
+                    auto_freeze_scale_step_p95=args.auto_freeze_scale_step_p95,
+                    auto_freeze_quality_floor=args.auto_freeze_quality_floor,
+                    auto_freeze_scale_step_median_max=args.auto_freeze_scale_step_median_max,
+                    auto_freeze_scale_step_override=args.auto_freeze_scale_step_override,
+                    auto_freeze_max_frame=args.auto_freeze_max_frame,
                     seam_recenter=args.seam_recenter,
                     polar_rectify=args.polar_rectify,
                     polar_latitude_threshold=args.polar_latitude_threshold,
@@ -169,6 +181,12 @@ def main(argv=None):
                     anchor_update_threshold=args.anchor_update_threshold,
                     auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
                     auto_freeze_scale_window=args.auto_freeze_scale_window,
+                    auto_freeze_quality_slope=args.auto_freeze_quality_slope,
+                    auto_freeze_scale_step_p95=args.auto_freeze_scale_step_p95,
+                    auto_freeze_quality_floor=args.auto_freeze_quality_floor,
+                    auto_freeze_scale_step_median_max=args.auto_freeze_scale_step_median_max,
+                    auto_freeze_scale_step_override=args.auto_freeze_scale_step_override,
+                    auto_freeze_max_frame=args.auto_freeze_max_frame,
                     seam_recenter=args.seam_recenter,
                     polar_rectify=args.polar_rectify,
                     polar_latitude_threshold=args.polar_latitude_threshold,

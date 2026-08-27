@@ -104,6 +104,12 @@ class OpenVinoB224Tracker:
                  fallback_cooldown=1, fallback_run=1, fallback_start_frame=0,
                  anchor_update_threshold=None,
                  auto_freeze_scale_threshold=None, auto_freeze_scale_window=40,
+                 auto_freeze_quality_slope=None,
+                 auto_freeze_scale_step_p95=None,
+                 auto_freeze_quality_floor=0.75,
+                 auto_freeze_scale_step_median_max=0.018,
+                 auto_freeze_scale_step_override=None,
+                 auto_freeze_max_frame=None,
                  seam_recenter=False,
                  polar_rectify=False, polar_latitude_threshold=55.0,
                  polar_aspect_max=2.5, polar_small_width=100.0,
@@ -137,7 +143,18 @@ class OpenVinoB224Tracker:
         self.auto_freeze_scale_threshold = (None if auto_freeze_scale_threshold is None
                                             else float(auto_freeze_scale_threshold))
         self.auto_freeze_scale_window = max(5, int(auto_freeze_scale_window))
+        self.auto_freeze_quality_slope = (None if auto_freeze_quality_slope is None
+                                          else float(auto_freeze_quality_slope))
+        self.auto_freeze_scale_step_p95 = (None if auto_freeze_scale_step_p95 is None
+                                           else float(auto_freeze_scale_step_p95))
+        self.auto_freeze_quality_floor = float(auto_freeze_quality_floor)
+        self.auto_freeze_scale_step_median_max = float(auto_freeze_scale_step_median_max)
+        self.auto_freeze_scale_step_override = (None if auto_freeze_scale_step_override is None
+                                                else float(auto_freeze_scale_step_override))
+        self.auto_freeze_max_frame = (None if auto_freeze_max_frame is None
+                                      else int(auto_freeze_max_frame))
         self.area_history = []
+        self.quality_history = []
         self.updates_frozen = False
         self.updates_frozen_frame = None
         self.anchor_template = None
@@ -261,6 +278,7 @@ class OpenVinoB224Tracker:
         self.polar_sample_count = 0
         self.fallback_low_run = 0
         self.area_history = [max(1.0, float(self.state[2] * self.state[3]))]
+        self.quality_history = []
         self.updates_frozen = False
         self.updates_frozen_frame = None
 
@@ -343,13 +361,48 @@ class OpenVinoB224Tracker:
                 self.last_fallback_used = True
         self.state = chosen["state"]
         conf = float(chosen["conf"])
-        self.area_history.append(max(1.0, float(self.state[2] * self.state[3])))
+        self.quality_history.append(conf)
+        # Diagnose scale instability from the primary stream, not the chosen
+        # fallback candidate.  A rescue crop can legitimately change the box
+        # area; counting that jump would make the rescue trigger its own
+        # freeze and is exactly what caused false freezes on smooth sequences.
+        primary_area = max(1.0, float(primary["state"][2] * primary["state"][3]))
+        self.area_history.append(primary_area)
         if (self.auto_freeze_scale_threshold is not None and
                 not self.updates_frozen and
+                (self.auto_freeze_max_frame is None or
+                 self.frame_id <= self.auto_freeze_max_frame) and
                 len(self.area_history) >= self.auto_freeze_scale_window):
             log_area = np.log(np.asarray(self.area_history[-self.auto_freeze_scale_window:],
                                          dtype=np.float32))
-            if float(np.std(log_area)) >= self.auto_freeze_scale_threshold:
+            q_ok = True
+            q_slope = None
+            if self.auto_freeze_quality_slope is not None:
+                q_window = max(5, self.auto_freeze_scale_window // 2)
+                if len(self.quality_history) < q_window:
+                    q_ok = False
+                else:
+                    q_slope = ((self.quality_history[-1] -
+                                self.quality_history[-q_window]) / q_window)
+                    q_ok = (q_slope <= self.auto_freeze_quality_slope or
+                            self.quality_history[-1] <= self.auto_freeze_quality_floor)
+            step_ok = True
+            p95_step = None
+            if self.auto_freeze_scale_step_p95 is not None:
+                steps = np.abs(np.diff(log_area))
+                if len(steps) == 0:
+                    step_ok = False
+                else:
+                    p95_step = float(np.percentile(steps, 95))
+                    median_step = float(np.median(steps))
+                    if (self.auto_freeze_scale_step_override is not None and
+                            p95_step >= self.auto_freeze_scale_step_override):
+                        q_ok = True
+                    step_ok = (p95_step >= self.auto_freeze_scale_step_p95 and
+                               (median_step <= self.auto_freeze_scale_step_median_max or
+                                q_ok))
+            if (float(np.std(log_area)) >= self.auto_freeze_scale_threshold and
+                    q_ok and step_ok):
                 self.updates_frozen = True
                 self.updates_frozen_frame = self.frame_id + 1
                 if self.templates:
@@ -395,6 +448,12 @@ class MotionAdaptiveTracker:
                  fallback_start_frame=0,
                  anchor_update_threshold=None,
                  auto_freeze_scale_threshold=None, auto_freeze_scale_window=40,
+                 auto_freeze_quality_slope=None,
+                 auto_freeze_scale_step_p95=None,
+                 auto_freeze_quality_floor=0.75,
+                 auto_freeze_scale_step_median_max=0.018,
+                 auto_freeze_scale_step_override=None,
+                 auto_freeze_max_frame=None,
                  search_factor=4.0, search_factor_mode="fixed",
                  seam_recenter=False, polar_rectify=False,
                  polar_latitude_threshold=55.0, polar_aspect_max=2.5,
@@ -413,6 +472,12 @@ class MotionAdaptiveTracker:
                                         anchor_update_threshold=anchor_update_threshold,
                                         auto_freeze_scale_threshold=auto_freeze_scale_threshold,
                                         auto_freeze_scale_window=auto_freeze_scale_window,
+                                        auto_freeze_quality_slope=auto_freeze_quality_slope,
+                                        auto_freeze_scale_step_p95=auto_freeze_scale_step_p95,
+                                        auto_freeze_quality_floor=auto_freeze_quality_floor,
+                                        auto_freeze_scale_step_median_max=auto_freeze_scale_step_median_max,
+                                        auto_freeze_scale_step_override=auto_freeze_scale_step_override,
+                                        auto_freeze_max_frame=auto_freeze_max_frame,
                                         seam_recenter=seam_recenter,
                                         polar_rectify=polar_rectify,
                                         polar_latitude_threshold=polar_latitude_threshold,
@@ -438,6 +503,16 @@ class MotionAdaptiveTracker:
         self.auto_freeze_scale_threshold = (None if auto_freeze_scale_threshold is None
                                             else float(auto_freeze_scale_threshold))
         self.auto_freeze_scale_window = int(auto_freeze_scale_window)
+        self.auto_freeze_quality_slope = (None if auto_freeze_quality_slope is None
+                                          else float(auto_freeze_quality_slope))
+        self.auto_freeze_scale_step_p95 = (None if auto_freeze_scale_step_p95 is None
+                                           else float(auto_freeze_scale_step_p95))
+        self.auto_freeze_quality_floor = float(auto_freeze_quality_floor)
+        self.auto_freeze_scale_step_median_max = float(auto_freeze_scale_step_median_max)
+        self.auto_freeze_scale_step_override = (None if auto_freeze_scale_step_override is None
+                                                else float(auto_freeze_scale_step_override))
+        self.auto_freeze_max_frame = (None if auto_freeze_max_frame is None
+                                      else int(auto_freeze_max_frame))
         self.seam_recenter = bool(seam_recenter)
         self.polar_rectify = bool(polar_rectify)
         self.polar_latitude_threshold = float(polar_latitude_threshold)
@@ -499,6 +574,12 @@ class MotionAdaptiveTracker:
                                             anchor_update_threshold=self.anchor_update_threshold,
                                             auto_freeze_scale_threshold=self.auto_freeze_scale_threshold,
                                             auto_freeze_scale_window=self.auto_freeze_scale_window,
+                                            auto_freeze_quality_slope=self.auto_freeze_quality_slope,
+                                            auto_freeze_scale_step_p95=self.auto_freeze_scale_step_p95,
+                                            auto_freeze_quality_floor=self.auto_freeze_quality_floor,
+                                            auto_freeze_scale_step_median_max=self.auto_freeze_scale_step_median_max,
+                                            auto_freeze_scale_step_override=self.auto_freeze_scale_step_override,
+                                            auto_freeze_max_frame=self.auto_freeze_max_frame,
                                             seam_recenter=self.seam_recenter,
                                             polar_rectify=self.polar_rectify,
                                             polar_latitude_threshold=self.polar_latitude_threshold,
@@ -552,6 +633,14 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--auto-freeze-scale-threshold", type=float, default=None,
                         help="freeze dynamic templates when rolling log-area variation exceeds this value")
     parser.add_argument("--auto-freeze-scale-window", type=int, default=40)
+    parser.add_argument("--auto-freeze-quality-slope", type=float, default=None,
+                        help="optional maximum quality slope required before scale freeze")
+    parser.add_argument("--auto-freeze-scale-step-p95", type=float, default=None,
+                        help="optional minimum P95 single-frame log-area jump for scale freeze")
+    parser.add_argument("--auto-freeze-quality-floor", type=float, default=0.75)
+    parser.add_argument("--auto-freeze-scale-step-median-max", type=float, default=0.018)
+    parser.add_argument("--auto-freeze-scale-step-override", type=float, default=None)
+    parser.add_argument("--auto-freeze-max-frame", type=int, default=None)
     parser.add_argument("--seam-recenter", action="store_true",
                         help="recenter the internal ERP box in the middle tile after each update")
     parser.add_argument("--polar-rectify", action="store_true",
@@ -606,6 +695,12 @@ def main(argv: list[str] | None = None) -> int:
                 anchor_update_threshold=args.anchor_update_threshold,
                 auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
                 auto_freeze_scale_window=args.auto_freeze_scale_window,
+                auto_freeze_quality_slope=args.auto_freeze_quality_slope,
+                auto_freeze_scale_step_p95=args.auto_freeze_scale_step_p95,
+                auto_freeze_quality_floor=args.auto_freeze_quality_floor,
+                auto_freeze_scale_step_median_max=args.auto_freeze_scale_step_median_max,
+                auto_freeze_scale_step_override=args.auto_freeze_scale_step_override,
+                auto_freeze_max_frame=args.auto_freeze_max_frame,
                 seam_recenter=args.seam_recenter,
                 polar_rectify=args.polar_rectify,
                 polar_latitude_threshold=args.polar_latitude_threshold,
@@ -633,6 +728,12 @@ def main(argv: list[str] | None = None) -> int:
                 anchor_update_threshold=args.anchor_update_threshold,
                 auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
                 auto_freeze_scale_window=args.auto_freeze_scale_window,
+                auto_freeze_quality_slope=args.auto_freeze_quality_slope,
+                auto_freeze_scale_step_p95=args.auto_freeze_scale_step_p95,
+                auto_freeze_quality_floor=args.auto_freeze_quality_floor,
+                auto_freeze_scale_step_median_max=args.auto_freeze_scale_step_median_max,
+                auto_freeze_scale_step_override=args.auto_freeze_scale_step_override,
+                auto_freeze_max_frame=args.auto_freeze_max_frame,
                 seam_recenter=args.seam_recenter,
                 polar_rectify=args.polar_rectify,
                 polar_latitude_threshold=args.polar_latitude_threshold,
@@ -673,6 +774,12 @@ def main(argv: list[str] | None = None) -> int:
     metrics["anchor_update_threshold"] = args.anchor_update_threshold
     metrics["auto_freeze_scale_threshold"] = args.auto_freeze_scale_threshold
     metrics["auto_freeze_scale_window"] = args.auto_freeze_scale_window
+    metrics["auto_freeze_quality_slope"] = args.auto_freeze_quality_slope
+    metrics["auto_freeze_scale_step_p95"] = args.auto_freeze_scale_step_p95
+    metrics["auto_freeze_quality_floor"] = args.auto_freeze_quality_floor
+    metrics["auto_freeze_scale_step_median_max"] = args.auto_freeze_scale_step_median_max
+    metrics["auto_freeze_scale_step_override"] = args.auto_freeze_scale_step_override
+    metrics["auto_freeze_max_frame"] = args.auto_freeze_max_frame
     metrics["seam_recenter"] = args.seam_recenter
     metrics["polar_rectify"] = args.polar_rectify
     metrics["polar_latitude_threshold"] = args.polar_latitude_threshold
