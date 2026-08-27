@@ -65,6 +65,29 @@ $env:PYTHONPATH='D:\instan\grt360_scratch\intel_runtime_probe_20260827\Lib\site-
 
 ## NPU 在最终方案中的定位
 
+## 2026-08-28 实测决策
+
+驱动更新后 NPU 已能枚举和执行，但不适合作为 B224 主干。相同 60 帧输入的结果如下：
+
+| 序列/设备 | AUC | SR | 端到端 FPS | P50 延迟 |
+|---|---:|---:|---:|---:|
+| `train_sim/seq_0072` GPU | 0.7272 | 0.9661 | 36.79 | 27.11 ms |
+| `train_sim/seq_0072` NPU（DRIVER） | 0.1800 | 0.0000 | 14.78 | 67.75 ms |
+| `train_sim/seq_0072` NPU（PLUGIN） | 0.1469 | 0.0000 | 14.06 | 68.73 ms |
+| `train_real/seq_0001` GPU | 0.9056 | 1.0000 | 38.59 | 25.92 ms |
+| `train_real/seq_0001` NPU（DRIVER） | 0.1743 | 0.0000 | 17.07 | 56.93 ms |
+
+逐张量对比确认输入完全相同，但 NPU 的 `size_map` 最大绝对差约 `0.662`、
+`offset_map` 最大绝对差约 `3.81`；切换内置 PLUGIN 编译器、显式 FP16 输入和
+`HETERO:NPU,CPU` 均未恢复数值一致性。因此当前验收策略明确为：**CPU+GPU 主线，NPU
+不进入 tracker 主路径**。原始对比报告在
+`D:\instan\grt360_scratch\device_compare_cpu_npu_seq0072_f1.json`，诊断脚本为
+`scripts/compare_openvino_device_outputs.py`。
+
+CPU+GPU 的资源分工固定为：Arc GPU 独占 B224/几何专家推理，CPU 负责视频解码、数据审计、
+失败矩阵、OOF 路由器和指标统计；不再用 NPU 数字参与 full130 或 FPS 晋级。NPU 仅保留为
+将来固定形状小型质量/几何子图的独立候选，必须先通过逐张量数值一致性和 30 FPS 预算。
+
 1. 若 B224 全图在 NPU 编译并达到可接受延迟：把 NPU 作为低功耗备用主干，与 Arc GPU
    做同图对照；最终仍以单设备端到端 FPS 和精度共同决定。
 2. 若 B224 因算子或编译器限制无法落 NPU：Arc GPU 继续跑主跟踪器，NPU 只承载固定形状的

@@ -673,6 +673,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", choices=["CPU", "GPU", "NPU"], default="GPU")
     parser.add_argument("--cache-dir", default=None,
                         help="optional OpenVINO device cache (important for NPU compile startup)")
+    parser.add_argument("--npu-platform", default=None,
+                        help="optional NPU platform ID (normally auto-detected on hardware)")
+    parser.add_argument("--npu-compiler-type", choices=["PLUGIN", "DRIVER", "PREFER_PLUGIN"], default=None,
+                        help="optional NPU compiler selection; PLUGIN is useful for graph numerical A/B")
     parser.add_argument("--high-xml", default=None,
                         help="second OpenVINO graph (typically template128) for motion-adaptive mode")
     parser.add_argument("--motion-adaptive", action="store_true")
@@ -752,6 +756,10 @@ def main(argv: list[str] | None = None) -> int:
         cache_dir = Path(args.cache_dir).resolve()
         cache_dir.mkdir(parents=True, exist_ok=True)
         compile_config["CACHE_DIR"] = str(cache_dir)
+    if args.device == "NPU" and args.npu_platform:
+        compile_config["NPU_PLATFORM"] = str(args.npu_platform)
+    if args.device == "NPU" and args.npu_compiler_type:
+        compile_config["NPU_COMPILER_TYPE"] = str(args.npu_compiler_type)
     compiled = core.compile_model(str(Path(args.xml).resolve()), args.device, compile_config)
     compiled_high = None
     if args.motion_adaptive:
