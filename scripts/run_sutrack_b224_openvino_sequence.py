@@ -37,6 +37,39 @@ def sample_target(image: np.ndarray, box, factor: float, output_size: int):
     return crop, float(output_size) / float(crop_size)
 
 
+def sample_target_polar(image: np.ndarray, box, factor: float, output_size: int,
+                        latitude_deg: float):
+    """Sample a locally rectified ERP crop near a pole.
+
+    ERP longitude pixels are stretched by roughly ``1/cos(latitude)``.  We
+    therefore sample a wider horizontal source window and resize it to the
+    square model input.  The caller receives independent x/y resize factors so
+    model coordinates can be mapped back without changing the tracker state
+    convention.
+    """
+    x, y, w, h = [float(v) for v in box]
+    crop_size = max(1, int(math.ceil(math.sqrt(max(1.0, w * h)) * factor)))
+    cos_lat = max(0.25, abs(math.cos(math.radians(float(latitude_deg)))))
+    crop_w = max(crop_size, int(math.ceil(float(crop_size) / cos_lat)))
+    # The caller normally supplies a three-tile canvas.  Keep the requested
+    # rectified window finite even for an extreme, highly elongated box.
+    crop_w = min(crop_w, int(image.shape[1]))
+    cx = x + 0.5 * w
+    cy = y + 0.5 * h
+    x1 = int(round(cx - 0.5 * crop_w))
+    x2 = x1 + crop_w
+    y1 = int(round(cy - 0.5 * crop_size))
+    y2 = y1 + crop_size
+    x1_pad, x2_pad = max(0, -x1), max(x2 - image.shape[1] + 1, 0)
+    y1_pad, y2_pad = max(0, -y1), max(y2 - image.shape[0] + 1, 0)
+    crop = image[y1 + y1_pad:y2 - y2_pad, x1 + x1_pad:x2 - x2_pad]
+    crop = cv2.copyMakeBorder(crop, y1_pad, y2_pad, x1_pad, x2_pad,
+                              cv2.BORDER_CONSTANT)
+    crop = cv2.resize(crop, (output_size, output_size), interpolation=cv2.INTER_LINEAR)
+    return crop, (float(output_size) / float(crop_w),
+                  float(output_size) / float(crop_size))
+
+
 def preprocess(patch: np.ndarray) -> np.ndarray:
     arr = patch.astype(np.float32) / 255.0
     arr = (arr - MEAN) / STD
@@ -68,7 +101,12 @@ class OpenVinoB224Tracker:
                  update_interval=25, update_threshold=0.70,
                  search_factor_mode="fixed", fallback_search_factor=None,
                  fallback_quality_threshold=0.45, fallback_min_gain=0.0,
-                 fallback_cooldown=1, seam_recenter=False):
+                 fallback_cooldown=1, seam_recenter=False,
+                 polar_rectify=False, polar_latitude_threshold=55.0,
+                 polar_aspect_max=2.5, polar_small_width=100.0,
+                 polar_max_frame=None, polar_require_initial=True,
+                 small_template_factor=None, small_template_width=100.0,
+                 small_template_require_initial=True):
         self.compiled = compiled_model
         self.width = self.height = None
         self.state = None
@@ -89,6 +127,21 @@ class OpenVinoB224Tracker:
         self.fallback_min_gain = float(fallback_min_gain)
         self.fallback_cooldown = max(1, int(fallback_cooldown))
         self.seam_recenter = bool(seam_recenter)
+        self.polar_rectify = bool(polar_rectify)
+        self.polar_latitude_threshold = float(polar_latitude_threshold)
+        self.polar_aspect_max = (None if polar_aspect_max is None
+                                 else float(polar_aspect_max))
+        self.polar_small_width = float(polar_small_width)
+        self.polar_max_frame = (None if polar_max_frame is None
+                                else int(polar_max_frame))
+        self.polar_require_initial = bool(polar_require_initial)
+        self.initial_latitude = None
+        self.small_template_factor = (None if small_template_factor is None
+                                      else float(small_template_factor))
+        self.small_template_width = float(small_template_width)
+        self.small_template_require_initial = bool(small_template_require_initial)
+        self.initial_target_width = None
+        self.polar_sample_count = 0
         self.fallback_calls = 0
         self.fallback_selected = 0
         self.last_fallback_used = False
@@ -104,15 +157,47 @@ class OpenVinoB224Tracker:
         self.template_names = [item.any_name for item in self.inputs if list(item.shape) == [1, 6, self.template_size, self.template_size]]
         self.anno_names = [item.any_name for item in self.inputs if list(item.shape) == [1, 4]]
 
+    def _latitude(self, box):
+        cy = float(box[1]) + 0.5 * float(box[3])
+        return 90.0 - cy / float(self.height) * 180.0
+
+    def _sample(self, image, box, factor, output_size, template=False):
+        small_width_ok = (float(box[2]) <= self.small_template_width)
+        if self.small_template_require_initial:
+            small_width_ok = (self.initial_target_width is not None and
+                              self.initial_target_width <= self.small_template_width)
+        if (template and self.small_template_factor is not None and small_width_ok):
+            factor = self.small_template_factor
+        latitude = self._latitude(box)
+        aspect = float(box[2]) / max(1.0, float(box[3]))
+        polar_shape_ok = (self.polar_aspect_max is None or
+                          aspect <= self.polar_aspect_max or
+                          float(box[2]) <= self.polar_small_width)
+        if (self.polar_rectify and
+                abs(latitude) >= self.polar_latitude_threshold and polar_shape_ok and
+                (not self.polar_require_initial or
+                 (self.initial_latitude is not None and
+                  abs(self.initial_latitude) >= self.polar_latitude_threshold)) and
+                (self.polar_max_frame is None or self.frame_id <= self.polar_max_frame)):
+            self.polar_sample_count += 1
+            return sample_target_polar(image, box, factor, output_size, latitude)
+        patch, rf = sample_target(image, box, factor, output_size)
+        return patch, (rf, rf)
+
     def _anno(self, box, resize_factor, size=None):
         size = self.template_size if size is None else int(size)
         cx = (size - 1.0) * 0.5
-        wh = np.asarray(box[2:4], dtype=np.float32) * float(resize_factor)
+        if np.isscalar(resize_factor):
+            resize_factor = (float(resize_factor), float(resize_factor))
+        wh = np.asarray(box[2:4], dtype=np.float32) * np.asarray(
+            resize_factor, dtype=np.float32)
         xy = np.asarray([cx, cx], dtype=np.float32) - 0.5 * wh
         return np.concatenate([xy, wh]) / float(size - 1)
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **_kwargs):
         self.height, self.width = frame_rgb.shape[:2]
+        self.initial_latitude = self._latitude(erp_box)
+        self.initial_target_width = float(erp_box[2])
         if self.search_factor_mode == "moderate_fov":
             # Geometry-only conditional crop: the factor-3.5 ablation helped
             # moderate-FOV OD-dominant scenes but harmed very wide/small-FOV
@@ -133,12 +218,14 @@ class OpenVinoB224Tracker:
         tiled = np.concatenate([frame_rgb, frame_rgb, frame_rgb], axis=1)
         self.state = [float(erp_box[0] % self.width + self.width), float(erp_box[1]),
                       float(erp_box[2]), float(erp_box[3])]
-        patch, rf = sample_target(tiled, self.state, self.template_factor, self.template_size)
+        patch, rf = self._sample(tiled, self.state, self.template_factor,
+                                 self.template_size, template=True)
         template = preprocess(patch)
         self.templates = [template.copy(), template.copy()]
         anno = self._anno(self.state, rf)
         self.annos = [anno.copy(), anno.copy()]
         self.frame_id = 0
+        self.polar_sample_count = 0
 
     def _infer_candidate(self, tiled, factor):
         """Run one pure candidate search without mutating tracker state.
@@ -148,7 +235,7 @@ class OpenVinoB224Tracker:
         the lightweight analogue of ODTrack's candidate-elimination idea: only
         frames whose primary response is weak pay for a second crop.
         """
-        patch, rf = sample_target(tiled, self.state, factor, self.search_size)
+        patch, rf = self._sample(tiled, self.state, factor, self.search_size)
         inputs = {self.template_names[0]: self.templates[0], self.template_names[1]: self.templates[1],
                   self.anno_names[0]: self.annos[0][None, :], self.anno_names[1]: self.annos[1][None, :],
                   self.search_name: preprocess(patch)}
@@ -165,12 +252,17 @@ class OpenVinoB224Tracker:
         wh = size[0, :, iy, ix]
         off = offset[0, :, iy, ix]
         normalized = np.asarray([(ix + off[0]) / fw, (iy + off[1]) / fh, wh[0], wh[1]], dtype=np.float32)
-        pred = normalized * (float(self.search_size) / float(rf))
+        scale_x = float(self.search_size) / float(rf[0])
+        scale_y = float(self.search_size) / float(rf[1])
+        pred = np.asarray([normalized[0] * scale_x, normalized[1] * scale_y,
+                           normalized[2] * scale_x, normalized[3] * scale_y],
+                          dtype=np.float32)
         prev_cx = self.state[0] + 0.5 * self.state[2]
         prev_cy = self.state[1] + 0.5 * self.state[3]
-        half = 0.5 * float(self.search_size) / float(rf)
-        state = [float(pred[0] + prev_cx - half - 0.5 * pred[2]),
-                 float(pred[1] + prev_cy - half - 0.5 * pred[3]),
+        half_x = 0.5 * float(self.search_size) / float(rf[0])
+        half_y = 0.5 * float(self.search_size) / float(rf[1])
+        state = [float(pred[0] + prev_cx - half_x - 0.5 * pred[2]),
+                 float(pred[1] + prev_cy - half_y - 0.5 * pred[3]),
                  float(pred[2]), float(pred[3])]
         state = clip_box(state, self.height, 3 * self.width, margin=10)
         if self.seam_recenter:
@@ -208,7 +300,8 @@ class OpenVinoB224Tracker:
         self.last_quality = conf
         self.frame_id += 1
         if self.update_interval > 0 and self.frame_id % self.update_interval == 0 and conf > self.update_threshold:
-            z_patch, z_rf = sample_target(tiled, self.state, self.template_factor, self.template_size)
+            z_patch, z_rf = self._sample(tiled, self.state, self.template_factor,
+                                         self.template_size, template=True)
             self.templates.append(preprocess(z_patch))
             self.annos.append(self._anno(self.state, z_rf))
             if len(self.templates) > 2:
@@ -224,11 +317,36 @@ class MotionAdaptiveTracker:
     """Use early quality evidence to choose a larger-template B224 branch."""
     def __init__(self, base_model, high_model, warmup=5, threshold_deg=1.5,
                  quality_threshold=0.40, quality_run=3, switch_deadline=30,
-                 seam_recenter=False):
+                 seam_recenter=False, polar_rectify=False,
+                 polar_latitude_threshold=55.0, polar_aspect_max=2.5,
+                 polar_small_width=100.0, polar_max_frame=None,
+                 polar_require_initial=True, small_template_factor=None,
+                 small_template_width=100.0, small_template_require_initial=True):
         self.base = OpenVinoB224Tracker(base_model, search_size=224, template_size=112,
-                                        seam_recenter=seam_recenter)
+                                        seam_recenter=seam_recenter,
+                                        polar_rectify=polar_rectify,
+                                        polar_latitude_threshold=polar_latitude_threshold,
+                                        polar_aspect_max=polar_aspect_max,
+                                        polar_small_width=polar_small_width,
+                                        polar_max_frame=polar_max_frame,
+                                        polar_require_initial=polar_require_initial,
+                                        small_template_factor=small_template_factor,
+                                        small_template_width=small_template_width,
+                                        small_template_require_initial=small_template_require_initial)
         self.high_model = high_model
         self.seam_recenter = bool(seam_recenter)
+        self.polar_rectify = bool(polar_rectify)
+        self.polar_latitude_threshold = float(polar_latitude_threshold)
+        self.polar_aspect_max = (None if polar_aspect_max is None
+                                 else float(polar_aspect_max))
+        self.polar_small_width = float(polar_small_width)
+        self.polar_max_frame = (None if polar_max_frame is None
+                                else int(polar_max_frame))
+        self.polar_require_initial = bool(polar_require_initial)
+        self.small_template_factor = (None if small_template_factor is None
+                                      else float(small_template_factor))
+        self.small_template_width = float(small_template_width)
+        self.small_template_require_initial = bool(small_template_require_initial)
         self.warmup = int(warmup)
         self.threshold_deg = float(threshold_deg)
         self.quality_threshold = float(quality_threshold)
@@ -266,7 +384,16 @@ class MotionAdaptiveTracker:
             current = [self.base.state[0] % self.base.width, self.base.state[1],
                        self.base.state[2], self.base.state[3]]
             self.high = OpenVinoB224Tracker(self.high_model, search_size=224, template_size=128,
-                                            seam_recenter=self.seam_recenter)
+                                            seam_recenter=self.seam_recenter,
+                                            polar_rectify=self.polar_rectify,
+                                            polar_latitude_threshold=self.polar_latitude_threshold,
+                                            polar_aspect_max=self.polar_aspect_max,
+                                            polar_small_width=self.polar_small_width,
+                                            polar_max_frame=self.polar_max_frame,
+                                            polar_require_initial=self.polar_require_initial,
+                                            small_template_factor=self.small_template_factor,
+                                            small_template_width=self.small_template_width,
+                                            small_template_require_initial=self.small_template_require_initial)
             self.high.init(frame_rgb, current, init_bfov=None)
             self.active = self.high
             self.switched = True
@@ -304,6 +431,26 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fallback-cooldown", type=int, default=1)
     parser.add_argument("--seam-recenter", action="store_true",
                         help="recenter the internal ERP box in the middle tile after each update")
+    parser.add_argument("--polar-rectify", action="store_true",
+                        help="horizontally rectify high-latitude ERP crops using cos(latitude)")
+    parser.add_argument("--polar-latitude-threshold", type=float, default=55.0)
+    parser.add_argument("--polar-aspect-max", type=float, default=2.5,
+                        help="only rectify polar boxes with w/h below this value")
+    parser.add_argument("--polar-small-width", type=float, default=100.0,
+                        help="also rectify polar boxes no wider than this many ERP pixels")
+    parser.add_argument("--polar-max-frame", type=int, default=None,
+                        help="optional early-frame limit for polar rectification")
+    parser.add_argument("--no-polar-require-initial", dest="polar_require_initial",
+                        action="store_false",
+                        help="allow rectification when a normal-latitude target later reaches a pole")
+    parser.set_defaults(polar_require_initial=True)
+    parser.add_argument("--small-template-factor", type=float, default=None,
+                        help="optional tighter template context for small ERP targets")
+    parser.add_argument("--small-template-width", type=float, default=100.0)
+    parser.add_argument("--no-small-template-require-initial",
+                        dest="small_template_require_initial", action="store_false",
+                        help="allow tighter templates when a target becomes small later")
+    parser.set_defaults(small_template_require_initial=True)
     parser.add_argument("--max-frames", type=int, default=None)
     args = parser.parse_args(argv)
     import openvino as ov
@@ -325,7 +472,16 @@ def main(argv: list[str] | None = None) -> int:
                 threshold_deg=args.motion_threshold_deg,
                 quality_threshold=args.quality_threshold, quality_run=args.quality_run,
                 switch_deadline=args.switch_deadline,
-                seam_recenter=args.seam_recenter)
+                seam_recenter=args.seam_recenter,
+                polar_rectify=args.polar_rectify,
+                polar_latitude_threshold=args.polar_latitude_threshold,
+                polar_aspect_max=args.polar_aspect_max,
+                polar_small_width=args.polar_small_width,
+                polar_max_frame=args.polar_max_frame,
+                polar_require_initial=args.polar_require_initial,
+                small_template_factor=args.small_template_factor,
+                small_template_width=args.small_template_width,
+                small_template_require_initial=args.small_template_require_initial)
             return tracker_holder["tracker"]
     else:
         def tracker_factory(**_kwargs):
@@ -338,7 +494,16 @@ def main(argv: list[str] | None = None) -> int:
                 fallback_quality_threshold=args.fallback_quality_threshold,
                 fallback_min_gain=args.fallback_min_gain,
                 fallback_cooldown=args.fallback_cooldown,
-                seam_recenter=args.seam_recenter)
+                seam_recenter=args.seam_recenter,
+                polar_rectify=args.polar_rectify,
+                polar_latitude_threshold=args.polar_latitude_threshold,
+                polar_aspect_max=args.polar_aspect_max,
+                polar_small_width=args.polar_small_width,
+                polar_max_frame=args.polar_max_frame,
+                polar_require_initial=args.polar_require_initial,
+                small_template_factor=args.small_template_factor,
+                small_template_width=args.small_template_width,
+                small_template_require_initial=args.small_template_require_initial)
             return tracker_holder["tracker"]
     metrics, pred_erp, _valid, _width, _height, qualities, _statuses, _traces, _latency = run_sequence(
         args.seq, args.data, tracker_factory, args.max_frames)
@@ -365,9 +530,19 @@ def main(argv: list[str] | None = None) -> int:
     metrics["fallback_min_gain"] = args.fallback_min_gain
     metrics["fallback_cooldown"] = args.fallback_cooldown
     metrics["seam_recenter"] = args.seam_recenter
+    metrics["polar_rectify"] = args.polar_rectify
+    metrics["polar_latitude_threshold"] = args.polar_latitude_threshold
+    metrics["polar_aspect_max"] = args.polar_aspect_max
+    metrics["polar_small_width"] = args.polar_small_width
+    metrics["polar_max_frame"] = args.polar_max_frame
+    metrics["polar_require_initial"] = args.polar_require_initial
+    metrics["small_template_factor"] = args.small_template_factor
+    metrics["small_template_width"] = args.small_template_width
+    metrics["small_template_require_initial"] = args.small_template_require_initial
     if not args.motion_adaptive and "tracker" in tracker_holder:
         metrics["fallback_calls"] = tracker_holder["tracker"].fallback_calls
         metrics["fallback_selected"] = tracker_holder["tracker"].fallback_selected
+        metrics["polar_sample_count"] = tracker_holder["tracker"].polar_sample_count
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     np.savetxt(out / "results_erp.txt", pred_erp, fmt="%.6f", delimiter=",")
