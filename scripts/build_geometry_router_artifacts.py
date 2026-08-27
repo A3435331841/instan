@@ -103,13 +103,18 @@ def main(argv=None) -> int:
     ap.add_argument("--data", required=True)
     ap.add_argument("--baseline", required=True)
     ap.add_argument("--candidate", required=True)
+    ap.add_argument("--candidate-extra", action="append", default=[],
+                    help="additional candidate roots (e.g. unchanged baseline or an earlier resumed shard); primary candidate wins")
     ap.add_argument("--out", required=True)
     ap.add_argument("--valid-list", default=None)
     ap.add_argument("--git-root", default=str(PROJECT_ROOT))
     args = ap.parse_args(argv)
     data = Path(args.data).resolve()
     baseline = _records(Path(args.baseline).resolve())
-    candidate = _records(Path(args.candidate).resolve())
+    candidate = {}
+    for extra in args.candidate_extra:
+        candidate.update(_records(Path(extra).resolve()))
+    candidate.update(_records(Path(args.candidate).resolve()))
     sequences = sorted(set(baseline) | set(candidate))
     rows = []
     for sequence in sequences:
