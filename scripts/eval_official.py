@@ -213,6 +213,46 @@ def build_sutrack_tracker(args):
     _TOOLS_DIR = str(Path(os.path.abspath(__file__)).parent.parent / "tools_local")
 
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", str(args.gpu))
+    _clip_load_original = None
+    _clip_state = None
+    if args.force_cpu:
+        # SUTrack's upstream constructor unconditionally calls .cuda() and
+        # its text encoder calls clip.load("ViT-L/14"), which would otherwise
+        # download a second ~GB model on a CPU-only workstation.  For a local
+        # timing smoke, build the exact OpenAI-CLIP architecture from the
+        # text_encoder.clip.* tensors already stored in the SUTrack checkpoint.
+        # This keeps the checkpoint strict-loadable and avoids any network
+        # access.  GPU/server behavior is unchanged because this branch is
+        # guarded by --force-cpu.
+        import torch as _torch
+        _torch.nn.Module.cuda = lambda self, *a, **k: self
+        _torch.Tensor.cuda = lambda self, *a, **k: self
+        try:
+            import clip as _clip
+            payload = _torch.load(str(Path(args.sutrack_ckpt).resolve()),
+                                  map_location="cpu", weights_only=False)
+            net_state = payload.get("net", payload)
+            _clip_state = {
+                key[len("text_encoder.clip."):]: value.detach().cpu()
+                for key, value in net_state.items()
+                if key.startswith("text_encoder.clip.")
+            }
+            if not _clip_state:
+                raise RuntimeError("checkpoint has no text_encoder.clip state")
+            _clip_load_original = _clip.load
+
+            def _load_clip_from_checkpoint(_name, device="cpu", **_kwargs):
+                model = _clip.model.build_model(_clip_state)
+                model = model.to(device)
+                if str(device) == "cpu":
+                    model.float()
+                return model, None
+
+            _clip.load = _load_clip_from_checkpoint
+        except ModuleNotFoundError as exc:
+            raise RuntimeError(
+                "CPU SUTrack smoke needs the openai-clip package; install it in the local probe environment"
+            ) from exc
     workspace = Path(args.sutrack_workspace).resolve()
     if not workspace.is_dir():
         raise SystemExit(f"[error] SUTrack workspace 不存在: {workspace}")
@@ -251,6 +291,9 @@ def build_sutrack_tracker(args):
     class SUTrackAdapter:
         def __init__(self):
             self.tracker = SUTRACK(params, "got10k")
+            if _clip_load_original is not None:
+                import clip as _clip
+                _clip.load = _clip_load_original
             # 如果指定了 LoRA checkpoint，注入 LoRA 并加载权重
             if getattr(args, 'sutrack_lora_ckpt', None):
                 import torch as _torch
