@@ -32,6 +32,8 @@ from scripts.run_sutrack_b224_openvino_sequence import (  # noqa: E402
 
 def route_t224(init_bfov) -> tuple[bool, list[str]]:
     """Return a geometry-only T224 decision and an auditable reason."""
+    if init_bfov is None:
+        return False, ["missing_init_bfov_b224_fallback"]
     fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]), float(init_bfov[1]))
     # These bands came from the pre-registered 8-sequence factor sweep.  They
     # distinguish compact, non-extreme-pole targets from the high-latitude
