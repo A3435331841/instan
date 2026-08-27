@@ -218,16 +218,18 @@ class OpenVinoB224Tracker:
             else:
                 self.active_search_factor = 4.0
         elif self.search_factor_mode == "large_fov":
-            # Large targets occupy most of the spherical view.  A factor-4
-            # crop makes them too small in the fixed 224 search token grid;
-            # use a tighter crop only when both axes are genuinely wide.
+            # Moderately large targets occupy most of the spherical view.  A
+            # factor-4 crop makes them too small in the fixed 224 search token
+            # grid; use a tighter crop for 90--150° horizontal views.  Near
+            # 180° views are kept on factor 4 because they benefit from the
+            # quality-gated template branch instead.
             if init_bfov is None:
                 from scripts.eval_official import bfov_from_erp_bbox
                 initial = bfov_from_erp_bbox(*erp_box, self.width, self.height)
                 fov_h, fov_v = initial.fov_h, initial.fov_v
             else:
                 fov_h, fov_v = float(init_bfov[2]), float(init_bfov[3])
-            if fov_h >= 90.0 and fov_v >= 100.0:
+            if 90.0 <= fov_h < 150.0 and fov_v >= 100.0:
                 self.active_search_factor = 2.0
             else:
                 self.active_search_factor = 4.0
