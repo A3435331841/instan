@@ -994,6 +994,8 @@ def run_sequence(seq_rel, data_root, tracker_factory, max_frames=None):
             "redetect_latency_ms": float(out.get("redetect_latency_ms", 0.0)),
             "expert_used": out.get("expert_used"),
             "expert_probed": bool(out.get("expert_probed", False)),
+            "fallback_used": bool(out.get("fallback_used", False)),
+            "fallback_factor": out.get("fallback_factor"),
             "expert_call_fraction": float(out.get("expert_call_fraction", 0.0)),
             "expert_budget_fraction": float(out.get("expert_budget_fraction", 0.0)),
             "expert_episode_remaining": int(out.get("expert_episode_remaining", 0)),
