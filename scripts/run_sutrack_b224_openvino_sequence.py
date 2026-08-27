@@ -198,8 +198,10 @@ class OpenVinoB224Tracker:
         conf = float(chosen["conf"])
         new_cx = self.state[0] + 0.5 * self.state[2]
         new_cy = self.state[1] + 0.5 * self.state[3]
-        dx = abs(new_cx - prev_cx)
-        dx = min(dx, self.width - dx % self.width)
+        # Circular longitude delta: the internal state may be represented in
+        # any tile, so a seam crossing must not appear as a 360-degree jump.
+        dx = abs(((new_cx - prev_cx + 0.5 * self.width) % self.width)
+                 - 0.5 * self.width)
         dy = abs(new_cy - prev_cy)
         self.last_motion_deg = float(np.hypot(dx * 360.0 / self.width,
                                                dy * 180.0 / self.height))
