@@ -45,11 +45,34 @@ def route_t224(init_bfov) -> tuple[bool, list[str]]:
     return False, ["b224_geometry_default"]
 
 
+def route_adaptive_b224(init_bfov) -> tuple[bool, list[str]]:
+    """Select adaptive B224 only for validated compact/moderate geometry."""
+    if init_bfov is None:
+        return False, []
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]), float(init_bfov[1]))
+    if abs(lat) >= 65.0 and fh < 30.0 and fv < 60.0:
+        return True, ["b224_adaptive_high_lat_compact"]
+    # The factor-3.5 branch is retained for moderate views wide enough to
+    # benefit from denser context.  Narrow 20--25 degree views are left on
+    # the conservative large_fov policy because the sweep exposed regressions
+    # there (notably in wide-motion real sequences).
+    if 25.0 <= fh <= 60.0 and fv <= 70.0:
+        return True, ["b224_adaptive_moderate_fov"]
+    return False, []
+
+
 class GeometryRoutedTracker:
     """Select B224 or T224 once, then run exactly one model per frame."""
 
     def __init__(self, b_model, b_high_model, t_model, **kwargs):
-        self.b = MotionAdaptiveTracker(b_model, b_high_model, **kwargs)
+        # Keep the original large-FoV policy as the safe B224 default.  The
+        # adaptive crop/small-polar protection is a separate branch and is
+        # enabled only by the causal high-latitude compact gate below.
+        self.b_default = MotionAdaptiveTracker(
+            b_model, b_high_model, **{**kwargs, "search_factor_mode": "large_fov"})
+        self.b_adaptive = MotionAdaptiveTracker(
+            b_model, b_high_model, **{**kwargs, "search_factor_mode": "adaptive"})
+        self.b = self.b_default
         tracker_keys = {
             "fallback_search_factor", "fallback_quality_threshold", "fallback_min_gain",
             "fallback_cooldown", "fallback_run", "fallback_start_frame",
@@ -77,15 +100,20 @@ class GeometryRoutedTracker:
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
         use_t, reasons = route_t224(init_bfov)
-        self.route_reasons = reasons
+        use_adaptive, adaptive_reasons = route_adaptive_b224(init_bfov)
+        self.route_reasons = reasons + adaptive_reasons
         if use_t:
             self.active = self.t
             self.selected_method = "sutrack_t224"
             self.t.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
-        else:
-            self.active = self.b
+        elif use_adaptive:
+            self.active = self.b_adaptive
             self.selected_method = "sutrack_b224"
-            self.b.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+            self.b_adaptive.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        else:
+            self.active = self.b_default
+            self.selected_method = "sutrack_b224"
+            self.b_default.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
 
     def track(self, frame_rgb, **kwargs):
         out = dict(self.active.track(frame_rgb, **kwargs))
@@ -95,11 +123,11 @@ class GeometryRoutedTracker:
 
     @property
     def base(self):
-        return self.b.base
+        return self.active.base if isinstance(self.active, MotionAdaptiveTracker) else self.b_default.base
 
     @property
     def switch_frame(self):
-        return self.b.switch_frame if self.selected_method == "sutrack_b224" else None
+        return self.active.switch_frame if isinstance(self.active, MotionAdaptiveTracker) else None
 
 
 def build_kwargs(args):
