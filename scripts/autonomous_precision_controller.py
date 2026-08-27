@@ -330,27 +330,37 @@ def write_diagnostic_artifacts(out_root: Path, rows: list[dict], clusters: dict,
     }, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def choose_next_experiment(rows: list[dict], out_root: Path) -> dict:
+def choose_next_experiment(rows: list[dict], out_root: Path,
+                           history: list[dict] | None = None) -> dict:
     """Return one deterministic next action; never invent a new axis per loop."""
     if not rows:
         return {"status": "blocked", "reason": "no completed sequence metrics"}
     low = sorted(rows, key=lambda row: numeric(row, "auc"))
+    attempted = {(str(item.get("axis")), str(item.get("trigger_sequence")))
+                 for item in (history or [])}
     worst = low[0]
-    tags = set(str(worst.get("scene_tags_online", "")).split(";"))
-    if "large" in tags or numeric(worst, "active_search_factor") == 2.0:
-        axis = "large_target_recovery"
-        flags = ["--search-factor-mode", "large_fov", "--large-fov-fallback-search-factor", "5.0"]
-    elif "small" in tags or "seam" in tags or "fallback_overuse" in tags:
-        axis = "small_seam_recovery"
-        flags = ["--polar-rectify", "--polar-max-frame", "20",
-                 "--small-template-factor", "1.5", "--fallback-search-factor", "3.25"]
-    elif "scale" in tags or "low_quality" in tags:
-        axis = "scale_memory_guard"
-        flags = ["--auto-freeze-scale-threshold", "0.25", "--auto-freeze-scale-window", "40",
-                 "--auto-freeze-max-frame", "100"]
-    else:
-        axis = "baseline_recheck"
-        flags = []
+    axis, flags = "baseline_recheck", []
+    for candidate in low:
+        tags = set(str(candidate.get("scene_tags_online", "")).split(";"))
+        if "large" in tags or numeric(candidate, "active_search_factor") == 2.0:
+            candidate_axis = "large_target_recovery"
+            candidate_flags = ["--search-factor-mode", "large_fov",
+                               "--large-fov-fallback-search-factor", "5.0"]
+        elif "small" in tags or "seam" in tags or "fallback_overuse" in tags:
+            candidate_axis = "small_seam_recovery"
+            candidate_flags = ["--polar-rectify", "--polar-max-frame", "20",
+                               "--small-template-factor", "1.5",
+                               "--fallback-search-factor", "3.25"]
+        elif "scale" in tags or "low_quality" in tags:
+            candidate_axis = "scale_memory_guard"
+            candidate_flags = ["--auto-freeze-scale-threshold", "0.25",
+                               "--auto-freeze-scale-window", "40",
+                               "--auto-freeze-max-frame", "100"]
+        else:
+            candidate_axis, candidate_flags = "baseline_recheck", []
+        if (candidate_axis, str(candidate.get("sequence"))) not in attempted:
+            worst, axis, flags = candidate, candidate_axis, candidate_flags
+            break
     experiment_id = f"{axis}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     proposal = {
         "experiment_id": experiment_id,
@@ -567,6 +577,20 @@ def run_one_experiment(args, proposal: dict, rows: list[dict], policy: dict, out
     return int(completed.returncode), experiment_root
 
 
+def load_history(path: Path) -> list[dict]:
+    if not path.is_file():
+        return []
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, list) else []
+    except (OSError, ValueError, TypeError):
+        return []
+
+
+def save_history(path: Path, history: list[dict]) -> None:
+    path.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
 def make_parser():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--data", default=str(DEFAULT_DATA))
@@ -582,6 +606,9 @@ def make_parser():
     ap.add_argument("--max-frames", type=int, default=450)
     ap.add_argument("--apply", action="store_true", help="launch the proposed next experiment")
     ap.add_argument("--max-iterations", type=int, default=1)
+    ap.add_argument("--watch", action="store_true",
+                    help="wait for active GPU work and keep iterating until max-iterations or full pass")
+    ap.add_argument("--poll-seconds", type=int, default=60)
     return ap
 
 
@@ -592,13 +619,23 @@ def main(argv=None) -> int:
     tags = read_failure_tags(Path(args.failure_matrix) if args.failure_matrix else None)
     result_roots = [Path(args.results).resolve()]
     data_audit_rows = audit_data(Path(args.data).resolve())
+    history_path = out_root / "experiment_history.json"
+    history = load_history(history_path)
     last_code = 0
-    for iteration in range(max(1, int(args.max_iterations))):
+    max_iterations = max(1, int(args.max_iterations))
+    iteration = 0
+    while iteration < max_iterations:
+        if args.watch and process_snapshot():
+            print(json.dumps({"watch": "waiting_for_gpu", "processes": process_snapshot()},
+                             ensure_ascii=False), flush=True)
+            time.sleep(max(5, min(300, int(args.poll_seconds))))
+            continue
+        iteration += 1
         records = discover_metrics_many(result_roots)
         snapshot = write_snapshot(args, out_root, records)
         rows, clusters = build_diagnostics(records, tags)
         write_diagnostic_artifacts(out_root, rows, clusters, data_audit_rows)
-        proposal = choose_next_experiment(rows, out_root)
+        proposal = choose_next_experiment(rows, out_root, history)
         decision = acceptance(records, expected=130, data_audit_rows=data_audit_rows)
         (out_root / "promotion.json").write_text(
             json.dumps(decision, ensure_ascii=False, indent=2, allow_nan=True), encoding="utf-8")
@@ -622,11 +659,23 @@ def main(argv=None) -> int:
         }, ensure_ascii=False))
         if proposal.get("status") == "blocked":
             return 2
+        if decision.get("full_pass"):
+            (out_root / "MIGRATION_COMPLETE.json").write_text(
+                json.dumps({"completed_at": utc_now(), "acceptance": decision},
+                           ensure_ascii=False, indent=2), encoding="utf-8")
+            return 0
         if not args.apply:
             return 0
         if args.apply_scope == "full":
             args.max_frames = None
         last_code, experiment_root = run_one_experiment(args, proposal, rows, policy, out_root)
+        history.append({"experiment_id": proposal.get("experiment_id"),
+                        "axis": proposal.get("axis"),
+                        "trigger_sequence": proposal.get("trigger_sequence"),
+                        "returncode": last_code,
+                        "started_at": proposal.get("created_at"),
+                        "finished_at": utc_now()})
+        save_history(history_path, history)
         if experiment_root != out_root:
             result_roots.append(experiment_root)
             experiment_rows = discover_metrics(experiment_root)
@@ -636,6 +685,8 @@ def main(argv=None) -> int:
                 encoding="utf-8")
         if last_code != 0:
             return last_code
+        if not args.watch:
+            break
     return last_code
 
 
