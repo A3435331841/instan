@@ -217,6 +217,20 @@ class OpenVinoB224Tracker:
                 self.active_search_factor = 3.5
             else:
                 self.active_search_factor = 4.0
+        elif self.search_factor_mode == "large_fov":
+            # Large targets occupy most of the spherical view.  A factor-4
+            # crop makes them too small in the fixed 224 search token grid;
+            # use a tighter crop only when both axes are genuinely wide.
+            if init_bfov is None:
+                from scripts.eval_official import bfov_from_erp_bbox
+                initial = bfov_from_erp_bbox(*erp_box, self.width, self.height)
+                fov_h, fov_v = initial.fov_h, initial.fov_v
+            else:
+                fov_h, fov_v = float(init_bfov[2]), float(init_bfov[3])
+            if fov_h >= 90.0 and fov_v >= 100.0:
+                self.active_search_factor = 2.0
+            else:
+                self.active_search_factor = 4.0
         elif self.search_factor_mode != "fixed":
             raise ValueError(f"unknown search_factor_mode: {self.search_factor_mode}")
         tiled = np.concatenate([frame_rgb, frame_rgb, frame_rgb], axis=1)
@@ -330,12 +344,15 @@ class MotionAdaptiveTracker:
                  fallback_search_factor=None, fallback_quality_threshold=0.45,
                  fallback_min_gain=0.0, fallback_cooldown=1, fallback_run=1,
                  fallback_start_frame=0,
+                 search_factor=4.0, search_factor_mode="fixed",
                  seam_recenter=False, polar_rectify=False,
                  polar_latitude_threshold=55.0, polar_aspect_max=2.5,
                  polar_small_width=100.0, polar_max_frame=None,
                  polar_require_initial=True, small_template_factor=None,
                  small_template_width=100.0, small_template_require_initial=True):
         self.base = OpenVinoB224Tracker(base_model, search_size=224, template_size=112,
+                                        search_factor=search_factor,
+                                        search_factor_mode=search_factor_mode,
                                         fallback_search_factor=fallback_search_factor,
                                         fallback_quality_threshold=fallback_quality_threshold,
                                         fallback_min_gain=fallback_min_gain,
@@ -353,6 +370,8 @@ class MotionAdaptiveTracker:
                                         small_template_width=small_template_width,
                                         small_template_require_initial=small_template_require_initial)
         self.high_model = high_model
+        self.search_factor = float(search_factor)
+        self.search_factor_mode = str(search_factor_mode)
         self.fallback_search_factor = (None if fallback_search_factor is None
                                        else float(fallback_search_factor))
         self.fallback_quality_threshold = float(fallback_quality_threshold)
@@ -410,6 +429,8 @@ class MotionAdaptiveTracker:
             current = [self.base.state[0] % self.base.width, self.base.state[1],
                        self.base.state[2], self.base.state[3]]
             self.high = OpenVinoB224Tracker(self.high_model, search_size=224, template_size=128,
+                                            search_factor=self.search_factor,
+                                            search_factor_mode=self.search_factor_mode,
                                             fallback_search_factor=self.fallback_search_factor,
                                             fallback_quality_threshold=self.fallback_quality_threshold,
                                             fallback_min_gain=self.fallback_min_gain,
@@ -449,7 +470,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--switch-deadline", type=int, default=30)
     parser.add_argument("--out", required=True)
     parser.add_argument("--search-factor", type=float, default=4.0)
-    parser.add_argument("--search-factor-mode", choices=["fixed", "moderate_fov"], default="fixed")
+    parser.add_argument("--search-factor-mode", choices=["fixed", "moderate_fov", "large_fov"], default="fixed")
     parser.add_argument("--template-factor", type=float, default=2.0)
     parser.add_argument("--search-size", type=int, default=224)
     parser.add_argument("--template-size", type=int, default=112)
@@ -507,6 +528,8 @@ def main(argv: list[str] | None = None) -> int:
                 threshold_deg=args.motion_threshold_deg,
                 quality_threshold=args.quality_threshold, quality_run=args.quality_run,
                 switch_deadline=args.switch_deadline,
+                search_factor=args.search_factor,
+                search_factor_mode=args.search_factor_mode,
                 fallback_search_factor=args.fallback_search_factor,
                 fallback_quality_threshold=args.fallback_quality_threshold,
                 fallback_min_gain=args.fallback_min_gain,
@@ -585,10 +608,12 @@ def main(argv: list[str] | None = None) -> int:
     metrics["small_template_width"] = args.small_template_width
     metrics["small_template_require_initial"] = args.small_template_require_initial
     if not args.motion_adaptive and "tracker" in tracker_holder:
+        metrics["active_search_factor"] = tracker_holder["tracker"].active_search_factor
         metrics["fallback_calls"] = tracker_holder["tracker"].fallback_calls
         metrics["fallback_selected"] = tracker_holder["tracker"].fallback_selected
         metrics["polar_sample_count"] = tracker_holder["tracker"].polar_sample_count
     elif args.motion_adaptive and "tracker" in tracker_holder:
+        metrics["active_search_factor"] = tracker_holder["tracker"].base.active_search_factor
         metrics["fallback_calls"] = tracker_holder["tracker"].base.fallback_calls
         metrics["fallback_selected"] = tracker_holder["tracker"].base.fallback_selected
         metrics["polar_sample_count"] = tracker_holder["tracker"].base.polar_sample_count
