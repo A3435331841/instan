@@ -299,6 +299,8 @@ class OpenVinoB224Tracker:
         self.last_fallback_used = False
         self.last_motion_deg = 0.0
         self.last_quality = 1.0
+        self.quality_low_run = 0
+        self.state_status = "normal"
         side = self.search_size // 16
         axis = 0.5 * (1.0 - np.cos((2.0 * math.pi / (side + 1.0)) *
                                    np.arange(1, side + 1, dtype=np.float32)))
@@ -480,6 +482,8 @@ class OpenVinoB224Tracker:
         self.frame_id = 0
         self.polar_sample_count = 0
         self.fallback_low_run = 0
+        self.quality_low_run = 0
+        self.state_status = "normal"
         self.area_history = [max(1.0, float(self.state[2] * self.state[3]))]
         self.quality_history = []
         self.updates_frozen = False
@@ -603,6 +607,16 @@ class OpenVinoB224Tracker:
             self.bfov_state = chosen["bfov"]
         conf = float(chosen["conf"])
         self.quality_history.append(conf)
+        if conf <= self.fallback_quality_threshold:
+            self.quality_low_run += 1
+        else:
+            self.quality_low_run = 0
+        if self.quality_low_run >= max(8, 2 * max(1, self.fallback_run)):
+            self.state_status = "lost"
+        elif self.quality_low_run >= max(1, self.fallback_run):
+            self.state_status = "suspect"
+        else:
+            self.state_status = "normal"
         # Diagnose scale instability from the primary stream, not the chosen
         # fallback candidate.  A rescue crop can legitimately change the box
         # area; counting that jump would make the rescue trigger its own
@@ -680,6 +694,7 @@ class OpenVinoB224Tracker:
                     self.annos.pop(1)
         return {"target_bbox": [self.state[0] % self.width, self.state[1], self.state[2], self.state[3]],
                 "quality": conf,
+                "status": self.state_status,
                 "fallback_used": self.last_fallback_used,
                 "fallback_factor": chosen["factor"],
                 "anchor_similarity": self.last_anchor_similarity,
