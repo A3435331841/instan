@@ -22,7 +22,6 @@ from panotrack.geometry.projection import (  # noqa: E402
     remap_image,
     tangent_remap,
 )
-from panotrack.pipeline.pipeline import _erp_bbox_to_local  # noqa: E402
 
 
 MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
@@ -110,6 +109,7 @@ def sample_target_ebfov(image: np.ndarray, box, factor: float, output_size: int,
     patch = remap_image(np.asarray(image), map_x, map_y)
     meta = {
         "mode": "ebfov" if max(cut.fov_h, cut.fov_v) > 90.0 else "gnomonic",
+        "target_bfov": target,
         "bfov": cut,
         "map_x": map_x,
         "map_y": map_y,
@@ -316,10 +316,15 @@ class OpenVinoB224Tracker:
     def _anno(self, box, resize_factor, size=None):
         size = self.template_size if size is None else int(size)
         if isinstance(resize_factor, dict):
-            local = _erp_bbox_to_local(
-                box, resize_factor["bfov"], size, size,
-                int(self.width), int(self.height))
-            lx, ly, lw, lh = [float(v) for v in local]
+            target = resize_factor.get("target_bfov")
+            cut = resize_factor["bfov"]
+            if target is None:
+                target = bfov_from_erp_bbox(*[float(v) for v in box],
+                                            int(self.width), int(self.height))
+            lw = float(size) * float(target.fov_h) / max(float(cut.fov_h), 1e-6)
+            lh = float(size) * float(target.fov_v) / max(float(cut.fov_v), 1e-6)
+            lx = (float(size) - 1.0) * 0.5 - 0.5 * lw
+            ly = (float(size) - 1.0) * 0.5 - 0.5 * lh
             cx = (size - 1.0) * 0.5
             return np.asarray([lx, ly, lw, lh], dtype=np.float32) / float(size - 1)
         cx = (size - 1.0) * 0.5
