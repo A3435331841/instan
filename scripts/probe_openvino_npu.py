@@ -139,7 +139,12 @@ def model_inventory(core: Any, model_path: Path) -> dict[str, Any]:
     return info
 
 
-def probe(model_path: Path, cache_dir: Path | None, force_compile: bool) -> dict[str, Any]:
+def probe(
+    model_path: Path,
+    cache_dir: Path | None,
+    force_compile: bool,
+    npu_platform: str | None = None,
+) -> dict[str, Any]:
     result: dict[str, Any] = {
         "schema": "grt360.npu_probe.v1",
         "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
@@ -216,6 +221,14 @@ def probe(model_path: Path, cache_dir: Path | None, force_compile: bool) -> dict
             try:
                 model = core.read_model(model_path)
                 config: dict[str, Any] = {}
+                if npu_platform:
+                    # Explicit platform IDs enable compiler-in-plugin offline
+                    # checks when no Level-Zero backend is enumerated.  The
+                    # 0x7D1D device on this host is NPU 3720; callers should
+                    # pass the ID only after checking their own PnP device.
+                    config["NPU_PLATFORM"] = str(npu_platform)
+                    if not npu_exposed:
+                        config["NPU_COMPILER_TYPE"] = "PLUGIN"
                 if cache_dir is not None:
                     cache_dir.mkdir(parents=True, exist_ok=True)
                     config["CACHE_DIR"] = str(cache_dir)
@@ -223,7 +236,8 @@ def probe(model_path: Path, cache_dir: Path | None, force_compile: bool) -> dict
                 core.compile_model(model, "NPU", config)
                 result["compile_status"] = "success"
                 result["compile_seconds"] = round(time.perf_counter() - started, 3)
-                result["status"] = "available_and_compiled"
+                result["compile_config"] = config
+                result["status"] = "available_and_compiled" if npu_exposed else "backend_missing_offline_compiled"
             except Exception as exc:  # noqa: BLE001
                 result["compile_status"] = "failed"
                 result["compile_error"] = f"{type(exc).__name__}: {exc}"
@@ -241,8 +255,10 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT, help="Fresh JSON report path")
     parser.add_argument("--cache-dir", type=Path, default=None, help="Optional OpenVINO NPU compile cache directory")
     parser.add_argument("--force-compile", action="store_true", help="Try NPU compilation even when NPU is not enumerated")
+    parser.add_argument("--npu-platform", default=None,
+                        help="explicit NPU platform ID for offline compile (0x7D1D/NPU 3720 -> 3720)")
     args = parser.parse_args()
-    report = probe(args.model, args.cache_dir, args.force_compile)
+    report = probe(args.model, args.cache_dir, args.force_compile, args.npu_platform)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     print(json.dumps(report, ensure_ascii=False, indent=2))

@@ -14,9 +14,13 @@
 | NPU 插件/编译器 | DLL 已随 OpenVINO 安装，编译器版本 `524290` |
 | B224 图 | 5 个输入全部静态（template 112、search 224），满足 NPU 静态形状要求 |
 
-探针还做了一次只读的 B224 编译尝试。当前失败发生在 NPU 后端/平台识别阶段，错误为
-`Unsupported platform: AUTO_DETECT`，还不能据此判断 B224 算子是否被 NPU 支持。完整原始报告在
-`D:\instan\grt360_scratch\npu_probe_20260827.json`。
+探针先用默认 `AUTO_DETECT` 做了只读编译尝试，失败发生在 NPU 后端/平台识别阶段；随后根据
+本机 PCI `DEV_7D1D` 对应的 NPU 3720 显式指定 `NPU_PLATFORM=3720`，B224 主图离线编译成功
+（约 16.1 秒），template128 高质量图也编译成功（约 17.7 秒）。这证明当前图可以被 NPU
+编译器接受；尚未证明能在硬件上执行，因为 Level-Zero 后端仍未枚举。报告分别在
+`D:\instan\grt360_scratch\npu_probe_20260827.json`、
+`D:\instan\grt360_scratch\npu_probe_offline3720_20260827.json` 和
+`D:\instan\grt360_scratch\npu_probe_high_offline3720_20260827.json`。
 
 Windows 注册表显示本机版本为 `25H2/build 26200`。某些工具仍把内核报告为
 `Windows 10`，因此探针按内核 build 判断 Windows 11 兼容性，不直接使用 `ProductName` 字符串。
@@ -39,6 +43,7 @@ $env:PYTHONPATH='D:\instan\grt360_scratch\intel_runtime_probe_20260827\Lib\site-
   --model 'D:\instan\grt360_scratch\openvino\sutrack_b224.xml' `
   --output 'D:\instan\grt360_scratch\npu_probe_after_driver.json' `
   --cache-dir 'D:\instan\grt360_scratch\openvino_cache\npu_b224' `
+  --npu-platform 3720 `
   --force-compile
 ```
 
