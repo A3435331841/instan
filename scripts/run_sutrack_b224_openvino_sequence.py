@@ -102,6 +102,8 @@ class OpenVinoB224Tracker:
                  search_factor_mode="fixed", fallback_search_factor=None,
                  fallback_quality_threshold=0.45, fallback_min_gain=0.0,
                  fallback_cooldown=1, fallback_run=1, fallback_start_frame=0,
+                 anchor_update_threshold=None,
+                 auto_freeze_scale_threshold=None, auto_freeze_scale_window=40,
                  seam_recenter=False,
                  polar_rectify=False, polar_latitude_threshold=55.0,
                  polar_aspect_max=2.5, polar_small_width=100.0,
@@ -130,6 +132,16 @@ class OpenVinoB224Tracker:
         self.fallback_run = max(1, int(fallback_run))
         self.fallback_start_frame = max(0, int(fallback_start_frame))
         self.fallback_low_run = 0
+        self.anchor_update_threshold = (None if anchor_update_threshold is None
+                                        else float(anchor_update_threshold))
+        self.auto_freeze_scale_threshold = (None if auto_freeze_scale_threshold is None
+                                            else float(auto_freeze_scale_threshold))
+        self.auto_freeze_scale_window = max(5, int(auto_freeze_scale_window))
+        self.area_history = []
+        self.updates_frozen = False
+        self.updates_frozen_frame = None
+        self.anchor_template = None
+        self.last_anchor_similarity = 1.0
         self.seam_recenter = bool(seam_recenter)
         self.polar_rectify = bool(polar_rectify)
         self.polar_latitude_threshold = float(polar_latitude_threshold)
@@ -241,12 +253,16 @@ class OpenVinoB224Tracker:
         patch, rf = self._sample(tiled, self.state, self.template_factor,
                                  self.template_size, template=True)
         template = preprocess(patch)
+        self.anchor_template = template[0, :3].copy()
         self.templates = [template.copy(), template.copy()]
         anno = self._anno(self.state, rf)
         self.annos = [anno.copy(), anno.copy()]
         self.frame_id = 0
         self.polar_sample_count = 0
         self.fallback_low_run = 0
+        self.area_history = [max(1.0, float(self.state[2] * self.state[3]))]
+        self.updates_frozen = False
+        self.updates_frozen_frame = None
 
     def _infer_candidate(self, tiled, factor):
         """Run one pure candidate search without mutating tracker state.
@@ -290,6 +306,19 @@ class OpenVinoB224Tracker:
             state = recenter_horizontal(state, self.width)
         return {"state": state, "conf": conf, "factor": float(factor)}
 
+    def _anchor_similarity(self, template):
+        """NCC between a candidate template and the immutable first-frame anchor."""
+        if self.anchor_template is None:
+            return 1.0
+        a = np.asarray(self.anchor_template, dtype=np.float32).reshape(-1)
+        b = np.asarray(template[0, :3], dtype=np.float32).reshape(-1)
+        a = a - float(a.mean())
+        b = b - float(b.mean())
+        denom = float(np.linalg.norm(a) * np.linalg.norm(b))
+        if denom <= 1e-8:
+            return 0.0
+        return float(np.dot(a, b) / denom)
+
     def track(self, frame_rgb, **_kwargs):
         tiled = np.concatenate([frame_rgb, frame_rgb, frame_rgb], axis=1)
         prev_cx = self.state[0] + 0.5 * self.state[2]
@@ -314,6 +343,18 @@ class OpenVinoB224Tracker:
                 self.last_fallback_used = True
         self.state = chosen["state"]
         conf = float(chosen["conf"])
+        self.area_history.append(max(1.0, float(self.state[2] * self.state[3])))
+        if (self.auto_freeze_scale_threshold is not None and
+                not self.updates_frozen and
+                len(self.area_history) >= self.auto_freeze_scale_window):
+            log_area = np.log(np.asarray(self.area_history[-self.auto_freeze_scale_window:],
+                                         dtype=np.float32))
+            if float(np.std(log_area)) >= self.auto_freeze_scale_threshold:
+                self.updates_frozen = True
+                self.updates_frozen_frame = self.frame_id + 1
+                if self.templates:
+                    self.templates[1] = self.templates[0].copy()
+                    self.annos[1] = self.annos[0].copy()
         new_cx = self.state[0] + 0.5 * self.state[2]
         new_cy = self.state[1] + 0.5 * self.state[3]
         # Circular longitude delta: the internal state may be represented in
@@ -325,18 +366,24 @@ class OpenVinoB224Tracker:
                                                dy * 180.0 / self.height))
         self.last_quality = conf
         self.frame_id += 1
-        if self.update_interval > 0 and self.frame_id % self.update_interval == 0 and conf > self.update_threshold:
+        if (self.update_interval > 0 and self.frame_id % self.update_interval == 0 and
+                conf > self.update_threshold and not self.updates_frozen):
             z_patch, z_rf = self._sample(tiled, self.state, self.template_factor,
                                          self.template_size, template=True)
-            self.templates.append(preprocess(z_patch))
-            self.annos.append(self._anno(self.state, z_rf))
-            if len(self.templates) > 2:
-                self.templates.pop(1)
-                self.annos.pop(1)
+            candidate_template = preprocess(z_patch)
+            self.last_anchor_similarity = self._anchor_similarity(candidate_template)
+            if (self.anchor_update_threshold is None or
+                    self.last_anchor_similarity >= self.anchor_update_threshold):
+                self.templates.append(candidate_template)
+                self.annos.append(self._anno(self.state, z_rf))
+                if len(self.templates) > 2:
+                    self.templates.pop(1)
+                    self.annos.pop(1)
         return {"target_bbox": [self.state[0] % self.width, self.state[1], self.state[2], self.state[3]],
                 "quality": conf,
                 "fallback_used": self.last_fallback_used,
-                "fallback_factor": chosen["factor"]}
+                "fallback_factor": chosen["factor"],
+                "anchor_similarity": self.last_anchor_similarity}
 
 
 class MotionAdaptiveTracker:
@@ -346,6 +393,8 @@ class MotionAdaptiveTracker:
                  fallback_search_factor=None, fallback_quality_threshold=0.45,
                  fallback_min_gain=0.0, fallback_cooldown=1, fallback_run=1,
                  fallback_start_frame=0,
+                 anchor_update_threshold=None,
+                 auto_freeze_scale_threshold=None, auto_freeze_scale_window=40,
                  search_factor=4.0, search_factor_mode="fixed",
                  seam_recenter=False, polar_rectify=False,
                  polar_latitude_threshold=55.0, polar_aspect_max=2.5,
@@ -361,6 +410,9 @@ class MotionAdaptiveTracker:
                                         fallback_cooldown=fallback_cooldown,
                                         fallback_run=fallback_run,
                                         fallback_start_frame=fallback_start_frame,
+                                        anchor_update_threshold=anchor_update_threshold,
+                                        auto_freeze_scale_threshold=auto_freeze_scale_threshold,
+                                        auto_freeze_scale_window=auto_freeze_scale_window,
                                         seam_recenter=seam_recenter,
                                         polar_rectify=polar_rectify,
                                         polar_latitude_threshold=polar_latitude_threshold,
@@ -381,6 +433,11 @@ class MotionAdaptiveTracker:
         self.fallback_cooldown = int(fallback_cooldown)
         self.fallback_run = int(fallback_run)
         self.fallback_start_frame = int(fallback_start_frame)
+        self.anchor_update_threshold = (None if anchor_update_threshold is None
+                                       else float(anchor_update_threshold))
+        self.auto_freeze_scale_threshold = (None if auto_freeze_scale_threshold is None
+                                            else float(auto_freeze_scale_threshold))
+        self.auto_freeze_scale_window = int(auto_freeze_scale_window)
         self.seam_recenter = bool(seam_recenter)
         self.polar_rectify = bool(polar_rectify)
         self.polar_latitude_threshold = float(polar_latitude_threshold)
@@ -439,6 +496,9 @@ class MotionAdaptiveTracker:
                                             fallback_cooldown=self.fallback_cooldown,
                                             fallback_run=self.fallback_run,
                                             fallback_start_frame=self.fallback_start_frame,
+                                            anchor_update_threshold=self.anchor_update_threshold,
+                                            auto_freeze_scale_threshold=self.auto_freeze_scale_threshold,
+                                            auto_freeze_scale_window=self.auto_freeze_scale_window,
                                             seam_recenter=self.seam_recenter,
                                             polar_rectify=self.polar_rectify,
                                             polar_latitude_threshold=self.polar_latitude_threshold,
@@ -487,6 +547,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fallback-run", type=int, default=1,
                         help="consecutive weak primary responses before probing fallback")
     parser.add_argument("--fallback-start-frame", type=int, default=0)
+    parser.add_argument("--anchor-update-threshold", type=float, default=None,
+                        help="minimum NCC to immutable first-frame anchor before accepting a template update")
+    parser.add_argument("--auto-freeze-scale-threshold", type=float, default=None,
+                        help="freeze dynamic templates when rolling log-area variation exceeds this value")
+    parser.add_argument("--auto-freeze-scale-window", type=int, default=40)
     parser.add_argument("--seam-recenter", action="store_true",
                         help="recenter the internal ERP box in the middle tile after each update")
     parser.add_argument("--polar-rectify", action="store_true",
@@ -538,6 +603,9 @@ def main(argv: list[str] | None = None) -> int:
                 fallback_cooldown=args.fallback_cooldown,
                 fallback_run=args.fallback_run,
                 fallback_start_frame=args.fallback_start_frame,
+                anchor_update_threshold=args.anchor_update_threshold,
+                auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
+                auto_freeze_scale_window=args.auto_freeze_scale_window,
                 seam_recenter=args.seam_recenter,
                 polar_rectify=args.polar_rectify,
                 polar_latitude_threshold=args.polar_latitude_threshold,
@@ -562,6 +630,9 @@ def main(argv: list[str] | None = None) -> int:
                 fallback_cooldown=args.fallback_cooldown,
                 fallback_run=args.fallback_run,
                 fallback_start_frame=args.fallback_start_frame,
+                anchor_update_threshold=args.anchor_update_threshold,
+                auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
+                auto_freeze_scale_window=args.auto_freeze_scale_window,
                 seam_recenter=args.seam_recenter,
                 polar_rectify=args.polar_rectify,
                 polar_latitude_threshold=args.polar_latitude_threshold,
@@ -599,6 +670,9 @@ def main(argv: list[str] | None = None) -> int:
     metrics["fallback_cooldown"] = args.fallback_cooldown
     metrics["fallback_run"] = args.fallback_run
     metrics["fallback_start_frame"] = args.fallback_start_frame
+    metrics["anchor_update_threshold"] = args.anchor_update_threshold
+    metrics["auto_freeze_scale_threshold"] = args.auto_freeze_scale_threshold
+    metrics["auto_freeze_scale_window"] = args.auto_freeze_scale_window
     metrics["seam_recenter"] = args.seam_recenter
     metrics["polar_rectify"] = args.polar_rectify
     metrics["polar_latitude_threshold"] = args.polar_latitude_threshold
@@ -614,11 +688,15 @@ def main(argv: list[str] | None = None) -> int:
         metrics["fallback_calls"] = tracker_holder["tracker"].fallback_calls
         metrics["fallback_selected"] = tracker_holder["tracker"].fallback_selected
         metrics["polar_sample_count"] = tracker_holder["tracker"].polar_sample_count
+        metrics["updates_frozen"] = tracker_holder["tracker"].updates_frozen
+        metrics["updates_frozen_frame"] = tracker_holder["tracker"].updates_frozen_frame
     elif args.motion_adaptive and "tracker" in tracker_holder:
         metrics["active_search_factor"] = tracker_holder["tracker"].base.active_search_factor
         metrics["fallback_calls"] = tracker_holder["tracker"].base.fallback_calls
         metrics["fallback_selected"] = tracker_holder["tracker"].base.fallback_selected
         metrics["polar_sample_count"] = tracker_holder["tracker"].base.polar_sample_count
+        metrics["updates_frozen"] = tracker_holder["tracker"].base.updates_frozen
+        metrics["updates_frozen_frame"] = tracker_holder["tracker"].base.updates_frozen_frame
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     np.savetxt(out / "results_erp.txt", pred_erp, fmt="%.6f", delimiter=",")

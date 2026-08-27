@@ -69,6 +69,9 @@ def make_parser():
     ap.add_argument("--fallback-cooldown", type=int, default=1)
     ap.add_argument("--fallback-run", type=int, default=1)
     ap.add_argument("--fallback-start-frame", type=int, default=0)
+    ap.add_argument("--anchor-update-threshold", type=float, default=None)
+    ap.add_argument("--auto-freeze-scale-threshold", type=float, default=None)
+    ap.add_argument("--auto-freeze-scale-window", type=int, default=40)
     ap.add_argument("--seam-recenter", action="store_true")
     ap.add_argument("--polar-rectify", action="store_true")
     ap.add_argument("--polar-latitude-threshold", type=float, default=55.0)
@@ -130,6 +133,9 @@ def main(argv=None):
                     fallback_cooldown=args.fallback_cooldown,
                     fallback_run=args.fallback_run,
                     fallback_start_frame=args.fallback_start_frame,
+                    anchor_update_threshold=args.anchor_update_threshold,
+                    auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
+                    auto_freeze_scale_window=args.auto_freeze_scale_window,
                     seam_recenter=args.seam_recenter,
                     polar_rectify=args.polar_rectify,
                     polar_latitude_threshold=args.polar_latitude_threshold,
@@ -160,6 +166,9 @@ def main(argv=None):
                     fallback_cooldown=args.fallback_cooldown,
                     fallback_run=args.fallback_run,
                     fallback_start_frame=args.fallback_start_frame,
+                    anchor_update_threshold=args.anchor_update_threshold,
+                    auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
+                    auto_freeze_scale_window=args.auto_freeze_scale_window,
                     seam_recenter=args.seam_recenter,
                     polar_rectify=args.polar_rectify,
                     polar_latitude_threshold=args.polar_latitude_threshold,
@@ -193,12 +202,16 @@ def main(argv=None):
                 metrics["fallback_calls"] = tracker.base.fallback_calls
                 metrics["fallback_selected"] = tracker.base.fallback_selected
                 metrics["polar_sample_count"] = tracker.base.polar_sample_count
+                metrics["updates_frozen"] = tracker.base.updates_frozen
+                metrics["updates_frozen_frame"] = tracker.base.updates_frozen_frame
                 metrics["switch_frame"] = tracker.switch_frame
             else:
                 metrics["active_search_factor"] = tracker.active_search_factor
                 metrics["fallback_calls"] = tracker.fallback_calls
                 metrics["fallback_selected"] = tracker.fallback_selected
                 metrics["polar_sample_count"] = tracker.polar_sample_count
+                metrics["updates_frozen"] = tracker.updates_frozen
+                metrics["updates_frozen_frame"] = tracker.updates_frozen_frame
             metrics["compile_seconds"] = compile_seconds
             metrics["batch_wall_seconds"] = time.perf_counter() - t0
             (seq_out / "metrics.json").write_text(
@@ -215,7 +228,8 @@ def main(argv=None):
     if rows:
         keys = ["sequence", "n_frames", "n_scored", "n_gt_absent", "auc", "sr",
                 "auc_dual", "sr_dual", "e2e_fps", "tracker_fps", "switch_frame",
-                "fallback_calls", "fallback_selected", "active_search_factor"]
+                "fallback_calls", "fallback_selected", "active_search_factor",
+                "updates_frozen", "updates_frozen_frame"]
         with (out_root / "summary.csv").open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=keys)
             writer.writeheader()
