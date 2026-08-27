@@ -20,7 +20,13 @@ from panotrack.geometry.bfov import BFoV, bfov_from_erp_bbox  # noqa: E402
 from panotrack.geometry.projection import (  # noqa: E402
     local_bbox_to_erp,
     remap_image,
+    RemapCache,
     tangent_remap,
+)
+from panotrack.geometry.sphere import (  # noqa: E402
+    _offset_dirs,
+    _tangent_frame,
+    unit_to_lonlat,
 )
 
 
@@ -84,7 +90,7 @@ def preprocess(patch: np.ndarray) -> np.ndarray:
 
 
 def sample_target_ebfov(image: np.ndarray, box, factor: float, output_size: int,
-                        erp_w: int, erp_h: int):
+                        erp_w: int, erp_h: int, remap_cache=None, target_bfov=None):
     """Sample an ERP frame in spherical/eBFoV coordinates.
 
     The returned patch is a perspective-compatible square, but its source
@@ -95,7 +101,8 @@ def sample_target_ebfov(image: np.ndarray, box, factor: float, output_size: int,
     with the map so the B224 local prediction can be inverse-projected without
     an ERP Jacobian approximation.
     """
-    target = bfov_from_erp_bbox(*[float(v) for v in box], int(erp_w), int(erp_h))
+    target = (target_bfov if target_bfov is not None else
+              bfov_from_erp_bbox(*[float(v) for v in box], int(erp_w), int(erp_h)))
     max_fov = 179.0
     cut = BFoV(
         lon=float(target.lon),
@@ -104,9 +111,23 @@ def sample_target_ebfov(image: np.ndarray, box, factor: float, output_size: int,
         fov_v=float(np.clip(target.fov_v * max(1.0, float(factor)), 4.0, max_fov)),
         rotation=float(getattr(target, "rotation", 0.0)),
     )
-    map_x, map_y = tangent_remap(cut, int(output_size), int(output_size),
-                                 int(erp_w), int(erp_h))
-    patch = remap_image(np.asarray(image), map_x, map_y)
+    if remap_cache is None:
+        map_x, map_y = tangent_remap(cut, int(output_size), int(output_size),
+                                     int(erp_w), int(erp_h))
+    else:
+        map_x, map_y = remap_cache.get_remap(
+            cut, int(output_size), int(output_size), int(erp_w), int(erp_h))
+    # ``tangent_remap`` and OpenCV both address source pixels by index, so no
+    # half-pixel shift is needed.  Pad one wrapped column to make interpolation
+    # at the right edge circular while using BORDER_REPLICATE vertically (the
+    # latter must not wrap across the north/south poles).
+    source = np.asarray(image)
+    source_padded = np.concatenate([source, source[:, :1]], axis=1)
+    map_x_cv = np.asarray(map_x, dtype=np.float32)
+    map_y_cv = np.clip(np.asarray(map_y, dtype=np.float32), 0.0, float(erp_h - 1))
+    patch = cv2.remap(source_padded, map_x_cv, map_y_cv,
+                      interpolation=cv2.INTER_LINEAR,
+                      borderMode=cv2.BORDER_REPLICATE)
     meta = {
         "mode": "ebfov" if max(cut.fov_h, cut.fov_v) > 90.0 else "gnomonic",
         "target_bfov": target,
@@ -118,6 +139,28 @@ def sample_target_ebfov(image: np.ndarray, box, factor: float, output_size: int,
         "output_size": int(output_size),
     }
     return patch, meta
+
+
+def bfov_from_local_box(local_box, cut_bfov, output_size):
+    """Convert a local projected prediction to BFoV without ERP round-trips."""
+    lx, ly, lw, lh = [float(v) for v in local_box]
+    size = float(output_size)
+    cx = (lx + 0.5 * lw) / size
+    cy = (ly + 0.5 * lh) / size
+    du = np.deg2rad((cx - 0.5) * float(cut_bfov.fov_h))
+    dv = np.deg2rad((0.5 - cy) * float(cut_bfov.fov_v))
+    gnomonic = max(float(cut_bfov.fov_h), float(cut_bfov.fov_v)) <= 90.0
+    vx, vy, vz = _offset_dirs(
+        np.asarray(du), np.asarray(dv),
+        _tangent_frame(float(cut_bfov.lon), float(cut_bfov.lat)), gnomonic)
+    lon, lat = unit_to_lonlat(vx, vy, vz)
+    return BFoV(
+        lon=float(lon),
+        lat=float(np.clip(lat, -89.9, 89.9)),
+        fov_h=max(float(lw) / size * float(cut_bfov.fov_h), 1e-3),
+        fov_v=max(float(lh) / size * float(cut_bfov.fov_v), 1e-3),
+        rotation=float(getattr(cut_bfov, "rotation", 0.0)),
+    )
 
 
 def clip_box(box, height: int, width: int, margin: int = 10):
@@ -246,6 +289,8 @@ class OpenVinoB224Tracker:
         if self.projection_mode not in ("erp", "auto", "ebfov"):
             raise ValueError(f"unknown projection_mode: {projection_mode}")
         self.projection_used_last = "erp"
+        self._ebfov_cache = RemapCache(capacity=256)
+        self.bfov_state = None
         self.initial_target_width = None
         self.polar_sample_count = 0
         self.fallback_calls = 0
@@ -280,7 +325,9 @@ class OpenVinoB224Tracker:
             return False
         if self.projection_mode == "ebfov":
             return True
-        target = bfov_from_erp_bbox(*[float(v) for v in box], int(self.width), int(self.height))
+        target = self.bfov_state
+        if target is None:
+            target = bfov_from_erp_bbox(*[float(v) for v in box], int(self.width), int(self.height))
         return max(target.fov_h, target.fov_v) * max(1.0, float(factor)) > 90.0
 
     def _sample(self, image, box, factor, output_size, template=False):
@@ -293,7 +340,8 @@ class OpenVinoB224Tracker:
         if self._should_project(box, factor):
             patch, meta = sample_target_ebfov(
                 self._source_frame(image), box, factor, output_size,
-                int(self.width), int(self.height))
+                int(self.width), int(self.height), self._ebfov_cache,
+                target_bfov=self.bfov_state)
             self.projection_used_last = str(meta["mode"])
             return patch, meta
         latitude = self._latitude(box)
@@ -376,6 +424,14 @@ class OpenVinoB224Tracker:
         elif self.search_factor_mode != "fixed":
             raise ValueError(f"unknown search_factor_mode: {self.search_factor_mode}")
         tiled = np.concatenate([frame_rgb, frame_rgb, frame_rgb], axis=1)
+        if self.projection_mode != "erp":
+            if init_bfov is not None:
+                self.bfov_state = BFoV(*[float(v) for v in init_bfov[:4]])
+            else:
+                self.bfov_state = bfov_from_erp_bbox(
+                    *[float(v) for v in erp_box], int(self.width), int(self.height))
+        else:
+            self.bfov_state = None
         state_x = (float(erp_box[0]) % self.width + self.width
                    if self.projection_mode == "erp" else float(erp_box[0]) % self.width)
         self.state = [state_x, float(erp_box[1]), float(erp_box[2]), float(erp_box[3])]
@@ -424,6 +480,7 @@ class OpenVinoB224Tracker:
         wh = size[0, :, iy, ix]
         off = offset[0, :, iy, ix]
         normalized = np.asarray([(ix + off[0]) / fw, (iy + off[1]) / fh, wh[0], wh[1]], dtype=np.float32)
+        candidate_bfov = None
         if isinstance(rf, dict):
             # In a projected patch, normalized coordinates already live in
             # the output grid.  Inverse-project the predicted local rectangle
@@ -436,6 +493,7 @@ class OpenVinoB224Tracker:
                 local_w,
                 local_h,
             ]
+            candidate_bfov = bfov_from_local_box(local_box, rf["bfov"], self.search_size)
             state = local_bbox_to_erp(
                 *local_box, rf["map_x"], rf["map_y"],
                 int(self.width), int(self.height))
@@ -458,7 +516,7 @@ class OpenVinoB224Tracker:
             state = clamp_state_scale(state, self.state, self.scale_clamp_factor)
         if self.seam_recenter:
             state = recenter_horizontal(state, self.width)
-        return {"state": state, "conf": conf, "factor": float(factor)}
+        return {"state": state, "conf": conf, "factor": float(factor), "bfov": candidate_bfov}
 
     def _anchor_similarity(self, template):
         """NCC between a candidate template and the immutable first-frame anchor."""
@@ -507,6 +565,8 @@ class OpenVinoB224Tracker:
                 self.fallback_selected += 1
                 self.last_fallback_used = True
         self.state = chosen["state"]
+        if chosen.get("bfov") is not None:
+            self.bfov_state = chosen["bfov"]
         conf = float(chosen["conf"])
         self.quality_history.append(conf)
         # Diagnose scale instability from the primary stream, not the chosen
