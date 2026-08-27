@@ -37,7 +37,7 @@
 
 ### 14 条混合场景统一前 450 帧
 
-使用同一前 450 帧范围重新评分：平均 AUC `0.2996 → 0.4666`（`+0.1670`），平均 SR `0.2805 → 0.4844`（`+0.2040`），胜场 9/14，独占救援 7 条，AUC 回退超过 0.10 的序列为 0 条；平均端到端 FPS 38.42。
+保守版（默认 large_fov B224，仅在高纬紧凑/已验证中视场启用 adaptive）重新评分：平均 AUC `0.2996 → 0.4586`（`+0.1590`），平均 SR `0.2805 → 0.4733`（`+0.1928`），胜场 8/14，独占救援 6 条，AUC 回退超过 0.10 的序列为 0 条；平均端到端 FPS 40.77。上一版曾把 adaptive 全局启用，导致 `real/0027`、`real/0018` 明显回退，已从主线撤回。
 
 ## 产物
 
@@ -45,9 +45,9 @@
 - B224 因果自适应搜索/极小高纬保护：`scripts/run_sutrack_b224_openvino_sequence.py`
 - 本地 T224 OpenVINO 图：`D:\instan\grt360_scratch\openvino\sutrack_t224_s224_t112.xml`
 - 8 条完整结果：`D:\instan\grt360_scratch\geometry_router_20260828\small_full`
-- 14 条统一前450帧结果：`D:\instan\grt360_scratch\geometry_router_20260828\representative14_450`
+- 旧版14条结果：`D:\instan\grt360_scratch\geometry_router_20260828\representative14_450`
+- 保守版14条结果：`D:\instan\grt360_scratch\geometry_router_v3_20260828\representative14_450`
 
 ## 当前状态与限制
 
-全量 130 条路由评测已启动，结果目录为 `D:\instan\grt360_scratch\geometry_router_20260828\full130`。在 full130 完成前不把路由器标记为提交候选；还必须通过锁定 valid35、端到端单设备速度、ONNX/OpenVINO 数值一致性和 Docker 离线干跑。
-
+保守版全量 130 条路由评测将写入 `D:\instan\grt360_scratch\geometry_router_v3_20260828\full130`。在 full130 完成前不把路由器标记为提交候选；还必须通过锁定 valid35、端到端单设备速度、ONNX/OpenVINO 数值一致性和 Docker 离线干跑。
