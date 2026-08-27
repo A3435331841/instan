@@ -24,4 +24,6 @@ CPU PyTorch 与 OpenVINO 首步输出的 `score_map/size_map/offset_map` 最大�
 
 ODTrack 在 `sim/0071`、`sim/0024` 这类极区/小目标上有明确潜力，但在 `sim/0082` 和大真实序列上速度或精度未过单序列门。因此当前保留为待门控低频专家，不替换 B224 主干，也未把它硬接入全量路由。
 
+服务器遗留的 failure-balanced v5 ep6 也已导出为同样的显式状态图并复测：`sim/0071` AUC `0.5801`、SR `0.7219`，`sim/0024` AUC `0.6169`，均低于原始 checkpoint 专家，故标记为不晋级但保留 checkpoint。
+
 产物：`scripts/export_odtrack_onnx.py`、`scripts/run_odtrack_openvino_sequence.py`，实验目录 `D:\instan\grt360_scratch\odtrack_openvino_gpu_20260828`。
