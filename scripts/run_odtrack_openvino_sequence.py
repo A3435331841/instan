@@ -21,7 +21,13 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.eval_official import run_sequence  # noqa: E402
-from scripts.run_sutrack_b224_openvino_sequence import clip_box, sample_target  # noqa: E402
+from scripts.run_sutrack_b224_openvino_sequence import (  # noqa: E402
+    bfov_from_local_box,
+    clip_box,
+    sample_target,
+    sample_target_ebfov,
+)
+from panotrack.geometry.bfov import BFoV, bfov_from_erp_bbox, erp_bbox_from_bfov  # noqa: E402
 
 MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
 STD = np.asarray([0.229, 0.224, 0.225], dtype=np.float32)
@@ -37,7 +43,7 @@ class OpenVinoODTrackTracker:
     def __init__(self, compiled_model, search_size=384, template_size=192,
                  search_factor=5.0, template_factor=2.0, update_interval=25,
                  update_threshold=0.55, seam_recenter=True,
-                 first_compiled_model=None):
+                 first_compiled_model=None, projection_mode="erp"):
         # The upstream model has a special first call (one template, no
         # track-query) and steady-state calls (one template + query).  Keep a
         # separate first graph when supplied; the legacy three-template graph
@@ -51,6 +57,11 @@ class OpenVinoODTrackTracker:
         self.update_interval = int(update_interval)
         self.update_threshold = float(update_threshold)
         self.seam_recenter = bool(seam_recenter)
+        self.projection_mode = str(projection_mode).lower()
+        if self.projection_mode not in {"erp", "tangent"}:
+            raise ValueError(f"unknown projection_mode: {projection_mode}")
+        self.bfov_state = None
+        self._ebfov_cache = None
         self.width = self.height = None
         self.state = None
         self.templates = None
@@ -90,14 +101,28 @@ class OpenVinoODTrackTracker:
         self.offset_name = io["offset"]
         self.next_query_name = io["next_query"]
 
-    def init(self, frame_rgb, erp_box, **_kwargs):
+    def init(self, frame_rgb, erp_box, init_bfov=None, **_kwargs):
         self.height, self.width = frame_rgb.shape[:2]
+        if self.projection_mode == "tangent":
+            self.bfov_state = (BFoV(*[float(v) for v in init_bfov[:4]])
+                               if init_bfov is not None else
+                               bfov_from_erp_bbox(*erp_box, self.width, self.height))
+            # A local import avoids constructing a cache for the legacy ERP
+            # path; the same cached OpenCV remap implementation as B224 is
+            # used by the expert.
+            from panotrack.geometry.projection import RemapCache
+            self._ebfov_cache = RemapCache(capacity=128)
         # ODTrack's planar adapter tracks on the middle tile.  Keep the same
         # convention so a crop can cross the 0/360 seam without truncation.
         self.state = [float(erp_box[0]) + self.width, float(erp_box[1]),
                       float(erp_box[2]), float(erp_box[3])]
         tiled = np.concatenate([frame_rgb, frame_rgb, frame_rgb], axis=1)
-        patch, _rf = sample_target(tiled, self.state, self.template_factor, self.template_size)
+        if self.projection_mode == "tangent":
+            patch, _rf = sample_target_ebfov(
+                frame_rgb, erp_box, self.template_factor, self.template_size,
+                self.width, self.height, self._ebfov_cache, self.bfov_state)
+        else:
+            patch, _rf = sample_target(tiled, self.state, self.template_factor, self.template_size)
         t = preprocess_rgb(patch)
         self.templates = [t.copy(), t.copy(), t.copy()] if self.first_compiled is None else [t.copy()]
         self.track_query = np.zeros((1, 1, 768), dtype=np.float32)
@@ -127,7 +152,12 @@ class OpenVinoODTrackTracker:
 
     def track(self, frame_rgb, **_kwargs):
         tiled = np.concatenate([frame_rgb, frame_rgb, frame_rgb], axis=1)
-        patch, resize_factor = sample_target(tiled, self.state, self.search_factor, self.search_size)
+        if self.projection_mode == "tangent":
+            patch, resize_factor = sample_target_ebfov(
+                frame_rgb, self.state, self.search_factor, self.search_size,
+                self.width, self.height, self._ebfov_cache, self.bfov_state)
+        else:
+            patch, resize_factor = sample_target(tiled, self.state, self.search_factor, self.search_size)
         use_first = self.first_compiled is not None and self.frame_id == 0
         compiled = self.first_compiled if use_first else self.compiled
         io = self.first_io if use_first else {
@@ -152,13 +182,27 @@ class OpenVinoODTrackTracker:
         normalized = np.asarray([(ix + float(offset[0, 0, iy, ix])) / response.shape[1],
                                  (iy + float(offset[0, 1, iy, ix])) / response.shape[0],
                                  float(size[0, 0, iy, ix]), float(size[0, 1, iy, ix])], dtype=np.float32)
-        self.state = self._map_box(normalized, resize_factor)
+        if self.projection_mode == "tangent":
+            local_w = float(normalized[2]) * self.search_size
+            local_h = float(normalized[3]) * self.search_size
+            local_box = [float(normalized[0]) * self.search_size - 0.5 * local_w,
+                         float(normalized[1]) * self.search_size - 0.5 * local_h,
+                         local_w, local_h]
+            self.bfov_state = bfov_from_local_box(local_box, resize_factor["bfov"], self.search_size)
+            self.state = list(erp_bbox_from_bfov(self.bfov_state, self.width, self.height))
+        else:
+            self.state = self._map_box(normalized, resize_factor)
         self.track_query = np.asarray(result[io["next_query"]], dtype=np.float32)
         self.last_quality = conf
         self.frame_id += 1
         if (self.update_interval > 0 and self.frame_id % self.update_interval == 0 and
                 conf >= self.update_threshold):
-            z_patch, _ = sample_target(tiled, self.state, self.template_factor, self.template_size)
+            if self.projection_mode == "tangent":
+                z_patch, _ = sample_target_ebfov(
+                    frame_rgb, self.state, self.template_factor, self.template_size,
+                    self.width, self.height, self._ebfov_cache, self.bfov_state)
+            else:
+                z_patch, _ = sample_target(tiled, self.state, self.template_factor, self.template_size)
             new_template = preprocess_rgb(z_patch)
             if self.first_compiled is None:
                 self.templates = [self.templates[1], self.templates[2], new_template]
@@ -181,6 +225,7 @@ def main(argv=None) -> int:
     ap.add_argument("--search-factor", type=float, default=5.0)
     ap.add_argument("--template-factor", type=float, default=2.0)
     ap.add_argument("--update-interval", type=int, default=25)
+    ap.add_argument("--projection-mode", choices=["erp", "tangent"], default="erp")
     args = ap.parse_args(argv)
     import openvino as ov
 
@@ -197,7 +242,8 @@ def main(argv=None) -> int:
                                          template_factor=args.template_factor,
                                          update_interval=args.update_interval,
                                          seam_recenter=True,
-                                         first_compiled_model=first_compiled)
+                                         first_compiled_model=first_compiled,
+                                         projection_mode=args.projection_mode)
         holder["tracker"] = tracker
         return tracker
 
@@ -205,7 +251,7 @@ def main(argv=None) -> int:
         args.seq, args.data, factory, args.max_frames)
     metrics.update({"compile_seconds": compile_seconds, "search_factor": args.search_factor,
                     "template_factor": args.template_factor, "graph": str(Path(args.xml).resolve()),
-                    "device": args.device})
+                    "device": args.device, "projection_mode": args.projection_mode})
     out = Path(args.out).resolve(); out.mkdir(parents=True, exist_ok=True)
     np.savetxt(out / "results_erp.txt", pred, fmt="%.6f", delimiter=",")
     np.savetxt(out / "quality.txt", qualities, fmt="%.6f")

@@ -20,7 +20,8 @@ CPU PyTorch 与 OpenVINO 首步输出的 `score_map/size_map/offset_map` 最大�
 | `train_sim/seq_0082` | 450 | 0.2068 | 0.1425 | 28.78 |
 | `train_real/seq_0031` | 450 | 0.5114 | 0.7671 | 21.07 |
 
+切平面球面分支（只在极区候选时测试）进一步得到：`sim/0071` 900 帧 AUC `0.6464`、SR `0.8587`、端到端 FPS `19.61`；`sim/0024` 450 帧 AUC `0.6423`、SR `0.8953`、FPS `19.34`。它确实能补极区误差，但慢专家只能在 LOST/VERIFY 状态低频调用，并受 token-bucket 预算约束。
+
 ODTrack 在 `sim/0071`、`sim/0024` 这类极区/小目标上有明确潜力，但在 `sim/0082` 和大真实序列上速度或精度未过单序列门。因此当前保留为待门控低频专家，不替换 B224 主干，也未把它硬接入全量路由。
 
 产物：`scripts/export_odtrack_onnx.py`、`scripts/run_odtrack_openvino_sequence.py`，实验目录 `D:\instan\grt360_scratch\odtrack_openvino_gpu_20260828`。
-
