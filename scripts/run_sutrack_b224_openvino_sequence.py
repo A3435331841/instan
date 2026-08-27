@@ -54,13 +54,21 @@ def clip_box(box, height: int, width: int, margin: int = 10):
     return [x1, y1, max(float(margin), x2 - x1), max(float(margin), y2 - y1)]
 
 
+def recenter_horizontal(box, width: int):
+    """Keep an ERP box center in the middle copy of the three-tile canvas."""
+    x, y, w, h = [float(v) for v in box]
+    center = x + 0.5 * w
+    center = ((center - float(width)) % float(width)) + float(width)
+    return [center - 0.5 * w, y, w, h]
+
+
 class OpenVinoB224Tracker:
     def __init__(self, compiled_model, search_size=224, template_size=112,
                  search_factor=4.0, template_factor=2.0,
                  update_interval=25, update_threshold=0.70,
                  search_factor_mode="fixed", fallback_search_factor=None,
                  fallback_quality_threshold=0.45, fallback_min_gain=0.0,
-                 fallback_cooldown=1):
+                 fallback_cooldown=1, seam_recenter=False):
         self.compiled = compiled_model
         self.width = self.height = None
         self.state = None
@@ -80,6 +88,7 @@ class OpenVinoB224Tracker:
         self.fallback_quality_threshold = float(fallback_quality_threshold)
         self.fallback_min_gain = float(fallback_min_gain)
         self.fallback_cooldown = max(1, int(fallback_cooldown))
+        self.seam_recenter = bool(seam_recenter)
         self.fallback_calls = 0
         self.fallback_selected = 0
         self.last_fallback_used = False
@@ -164,6 +173,8 @@ class OpenVinoB224Tracker:
                  float(pred[1] + prev_cy - half - 0.5 * pred[3]),
                  float(pred[2]), float(pred[3])]
         state = clip_box(state, self.height, 3 * self.width, margin=10)
+        if self.seam_recenter:
+            state = recenter_horizontal(state, self.width)
         return {"state": state, "conf": conf, "factor": float(factor)}
 
     def track(self, frame_rgb, **_kwargs):
@@ -210,9 +221,12 @@ class OpenVinoB224Tracker:
 class MotionAdaptiveTracker:
     """Use early quality evidence to choose a larger-template B224 branch."""
     def __init__(self, base_model, high_model, warmup=5, threshold_deg=1.5,
-                 quality_threshold=0.40, quality_run=3, switch_deadline=30):
-        self.base = OpenVinoB224Tracker(base_model, search_size=224, template_size=112)
+                 quality_threshold=0.40, quality_run=3, switch_deadline=30,
+                 seam_recenter=False):
+        self.base = OpenVinoB224Tracker(base_model, search_size=224, template_size=112,
+                                        seam_recenter=seam_recenter)
         self.high_model = high_model
+        self.seam_recenter = bool(seam_recenter)
         self.warmup = int(warmup)
         self.threshold_deg = float(threshold_deg)
         self.quality_threshold = float(quality_threshold)
@@ -249,7 +263,8 @@ class MotionAdaptiveTracker:
         if self.base.frame_id <= self.switch_deadline and low_quality:
             current = [self.base.state[0] % self.base.width, self.base.state[1],
                        self.base.state[2], self.base.state[3]]
-            self.high = OpenVinoB224Tracker(self.high_model, search_size=224, template_size=128)
+            self.high = OpenVinoB224Tracker(self.high_model, search_size=224, template_size=128,
+                                            seam_recenter=self.seam_recenter)
             self.high.init(frame_rgb, current, init_bfov=None)
             self.active = self.high
             self.switched = True
@@ -285,6 +300,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fallback-min-gain", type=float, default=0.0,
                         help="minimum Hann-windowed response gain required to accept fallback")
     parser.add_argument("--fallback-cooldown", type=int, default=1)
+    parser.add_argument("--seam-recenter", action="store_true",
+                        help="recenter the internal ERP box in the middle tile after each update")
     parser.add_argument("--max-frames", type=int, default=None)
     args = parser.parse_args(argv)
     import openvino as ov
@@ -305,7 +322,8 @@ def main(argv: list[str] | None = None) -> int:
             compiled, compiled_high, warmup=args.motion_warmup,
                 threshold_deg=args.motion_threshold_deg,
                 quality_threshold=args.quality_threshold, quality_run=args.quality_run,
-                switch_deadline=args.switch_deadline)
+                switch_deadline=args.switch_deadline,
+                seam_recenter=args.seam_recenter)
             return tracker_holder["tracker"]
     else:
         def tracker_factory(**_kwargs):
@@ -317,7 +335,8 @@ def main(argv: list[str] | None = None) -> int:
                 fallback_search_factor=args.fallback_search_factor,
                 fallback_quality_threshold=args.fallback_quality_threshold,
                 fallback_min_gain=args.fallback_min_gain,
-                fallback_cooldown=args.fallback_cooldown)
+                fallback_cooldown=args.fallback_cooldown,
+                seam_recenter=args.seam_recenter)
             return tracker_holder["tracker"]
     metrics, pred_erp, _valid, _width, _height, qualities, _statuses, _traces, _latency = run_sequence(
         args.seq, args.data, tracker_factory, args.max_frames)
@@ -343,6 +362,7 @@ def main(argv: list[str] | None = None) -> int:
     metrics["fallback_quality_threshold"] = args.fallback_quality_threshold
     metrics["fallback_min_gain"] = args.fallback_min_gain
     metrics["fallback_cooldown"] = args.fallback_cooldown
+    metrics["seam_recenter"] = args.seam_recenter
     if not args.motion_adaptive and "tracker" in tracker_holder:
         metrics["fallback_calls"] = tracker_holder["tracker"].fallback_calls
         metrics["fallback_selected"] = tracker_holder["tracker"].fallback_selected
