@@ -670,7 +670,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--xml", required=True)
     parser.add_argument("--data", required=True)
     parser.add_argument("--seq", default="train_sim/seq_0011")
-    parser.add_argument("--device", choices=["CPU", "GPU"], default="GPU")
+    parser.add_argument("--device", choices=["CPU", "GPU", "NPU"], default="GPU")
+    parser.add_argument("--cache-dir", default=None,
+                        help="optional OpenVINO device cache (important for NPU compile startup)")
     parser.add_argument("--high-xml", default=None,
                         help="second OpenVINO graph (typically template128) for motion-adaptive mode")
     parser.add_argument("--motion-adaptive", action="store_true")
@@ -744,12 +746,18 @@ def main(argv: list[str] | None = None) -> int:
     import openvino as ov
 
     compile_started = time.perf_counter()
-    compiled = ov.Core().compile_model(str(Path(args.xml).resolve()), args.device)
+    core = ov.Core()
+    compile_config = {}
+    if args.cache_dir:
+        cache_dir = Path(args.cache_dir).resolve()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        compile_config["CACHE_DIR"] = str(cache_dir)
+    compiled = core.compile_model(str(Path(args.xml).resolve()), args.device, compile_config)
     compiled_high = None
     if args.motion_adaptive:
         if not args.high_xml:
             raise SystemExit("--motion-adaptive requires --high-xml")
-        compiled_high = ov.Core().compile_model(str(Path(args.high_xml).resolve()), args.device)
+        compiled_high = core.compile_model(str(Path(args.high_xml).resolve()), args.device, compile_config)
     compile_seconds = time.perf_counter() - compile_started
     run_started = time.perf_counter()
     tracker_holder = {}

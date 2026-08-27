@@ -45,3 +45,9 @@ python scripts/autonomous_precision_controller.py `
 要让控制器在当前 GPU 任务结束后自动继续，可加 `--watch --apply --apply-scope cluster --max-iterations 12 --poll-seconds 60`。它会等待已有任务、记录每轮历史、拒绝并发 GPU，并在 full130 三项门槛通过后写入 `MIGRATION_COMPLETE.json` 后退出。
 
 当前本地 OpenVINO 暴露 `CPU` 和 `GPU`；若后续运行时暴露 `NPU`，控制器会自动记录但不会伪造不可用设备的成绩。
+
+NPU 的只读检查使用 `scripts/probe_openvino_npu.py`。它会区分 PnP 硬件正常但后端未枚举、
+NPU 已枚举但图编译失败、以及图编译成功等状态；详见
+[`docs/NPU_LOCAL_ACCELERATION.md`](NPU_LOCAL_ACCELERATION.md)。B224 单序列和批量 runner
+已接受 `--device NPU`，并支持 `--cache-dir`，但只有探针确认 `NPU` 可用后才应启动 NPU
+评测。

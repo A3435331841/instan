@@ -47,7 +47,9 @@ def make_parser():
     ap.add_argument("--high-xml", default=None)
     ap.add_argument("--data", required=True)
     ap.add_argument("--out", required=True)
-    ap.add_argument("--device", choices=["CPU", "GPU"], default="GPU")
+    ap.add_argument("--device", choices=["CPU", "GPU", "NPU"], default="GPU")
+    ap.add_argument("--cache-dir", default=None,
+                    help="optional OpenVINO device cache (important for NPU compile startup)")
     ap.add_argument("--seqs", default=None,
                     help="comma-separated sequence paths; default scans train_real/train_sim")
     ap.add_argument("--max-frames", type=int, default=None)
@@ -113,8 +115,13 @@ def main(argv=None):
     import openvino as ov
     compile_t0 = time.perf_counter()
     core = ov.Core()
-    compiled = core.compile_model(str(Path(args.xml).resolve()), args.device)
-    compiled_high = (core.compile_model(str(Path(args.high_xml).resolve()), args.device)
+    compile_config = {}
+    if args.cache_dir:
+        cache_dir = Path(args.cache_dir).resolve()
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        compile_config["CACHE_DIR"] = str(cache_dir)
+    compiled = core.compile_model(str(Path(args.xml).resolve()), args.device, compile_config)
+    compiled_high = (core.compile_model(str(Path(args.high_xml).resolve()), args.device, compile_config)
                      if args.motion_adaptive else None)
     compile_seconds = time.perf_counter() - compile_t0
 

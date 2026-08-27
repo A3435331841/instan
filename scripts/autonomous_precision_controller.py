@@ -69,6 +69,30 @@ def device_probe() -> dict:
             }
             for name in core.available_devices
         }
+        # The NPU plugin can be installed yet expose no backend when its
+        # driver/OS combination is not usable.  Keep that distinction in
+        # every autonomous snapshot instead of treating CPU/GPU-only as a
+        # silent absence.  Property queries are read-only and intentionally
+        # best-effort because older plugins expose different keys.
+        npu: dict[str, object] = {
+            "available": "NPU" in result["devices"],
+            "plugin_registered": False,
+        }
+        try:
+            supported = core.get_property("NPU", "SUPPORTED_PROPERTIES")
+            npu["plugin_registered"] = True
+            npu["supported_properties"] = str(supported)
+        except Exception as exc:  # noqa: BLE001
+            npu["property_error"] = f"{type(exc).__name__}: {exc}"
+        try:
+            npu["backend_devices"] = core.get_property("NPU", "AVAILABLE_DEVICES")
+        except Exception as exc:  # noqa: BLE001
+            npu["backend_error"] = f"{type(exc).__name__}: {exc}"
+        try:
+            npu["compiler_version"] = core.get_property("NPU", "NPU_COMPILER_VERSION")
+        except Exception as exc:  # noqa: BLE001
+            npu["compiler_error"] = f"{type(exc).__name__}: {exc}"
+        result["npu"] = npu
     except Exception as exc:  # noqa: BLE001
         result["openvino_error"] = str(exc)
     try:
