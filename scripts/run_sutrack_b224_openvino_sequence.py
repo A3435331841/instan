@@ -101,7 +101,8 @@ class OpenVinoB224Tracker:
                  update_interval=25, update_threshold=0.70,
                  search_factor_mode="fixed", fallback_search_factor=None,
                  fallback_quality_threshold=0.45, fallback_min_gain=0.0,
-                 fallback_cooldown=1, seam_recenter=False,
+                 fallback_cooldown=1, fallback_run=1, fallback_start_frame=0,
+                 seam_recenter=False,
                  polar_rectify=False, polar_latitude_threshold=55.0,
                  polar_aspect_max=2.5, polar_small_width=100.0,
                  polar_max_frame=None, polar_require_initial=True,
@@ -126,6 +127,9 @@ class OpenVinoB224Tracker:
         self.fallback_quality_threshold = float(fallback_quality_threshold)
         self.fallback_min_gain = float(fallback_min_gain)
         self.fallback_cooldown = max(1, int(fallback_cooldown))
+        self.fallback_run = max(1, int(fallback_run))
+        self.fallback_start_frame = max(0, int(fallback_start_frame))
+        self.fallback_low_run = 0
         self.seam_recenter = bool(seam_recenter)
         self.polar_rectify = bool(polar_rectify)
         self.polar_latitude_threshold = float(polar_latitude_threshold)
@@ -226,6 +230,7 @@ class OpenVinoB224Tracker:
         self.annos = [anno.copy(), anno.copy()]
         self.frame_id = 0
         self.polar_sample_count = 0
+        self.fallback_low_run = 0
 
     def _infer_candidate(self, tiled, factor):
         """Run one pure candidate search without mutating tracker state.
@@ -276,9 +281,14 @@ class OpenVinoB224Tracker:
         primary = self._infer_candidate(tiled, self.active_search_factor)
         chosen = primary
         self.last_fallback_used = False
+        if primary["conf"] <= self.fallback_quality_threshold:
+            self.fallback_low_run += 1
+        else:
+            self.fallback_low_run = 0
         if (self.fallback_search_factor is not None and
+                self.frame_id >= self.fallback_start_frame and
                 self.frame_id % self.fallback_cooldown == 0 and
-                primary["conf"] <= self.fallback_quality_threshold and
+                self.fallback_low_run >= self.fallback_run and
                 abs(self.fallback_search_factor - self.active_search_factor) > 1e-6):
             self.fallback_calls += 1
             alternate = self._infer_candidate(tiled, self.fallback_search_factor)
@@ -317,12 +327,21 @@ class MotionAdaptiveTracker:
     """Use early quality evidence to choose a larger-template B224 branch."""
     def __init__(self, base_model, high_model, warmup=5, threshold_deg=1.5,
                  quality_threshold=0.40, quality_run=3, switch_deadline=30,
+                 fallback_search_factor=None, fallback_quality_threshold=0.45,
+                 fallback_min_gain=0.0, fallback_cooldown=1, fallback_run=1,
+                 fallback_start_frame=0,
                  seam_recenter=False, polar_rectify=False,
                  polar_latitude_threshold=55.0, polar_aspect_max=2.5,
                  polar_small_width=100.0, polar_max_frame=None,
                  polar_require_initial=True, small_template_factor=None,
                  small_template_width=100.0, small_template_require_initial=True):
         self.base = OpenVinoB224Tracker(base_model, search_size=224, template_size=112,
+                                        fallback_search_factor=fallback_search_factor,
+                                        fallback_quality_threshold=fallback_quality_threshold,
+                                        fallback_min_gain=fallback_min_gain,
+                                        fallback_cooldown=fallback_cooldown,
+                                        fallback_run=fallback_run,
+                                        fallback_start_frame=fallback_start_frame,
                                         seam_recenter=seam_recenter,
                                         polar_rectify=polar_rectify,
                                         polar_latitude_threshold=polar_latitude_threshold,
@@ -334,6 +353,13 @@ class MotionAdaptiveTracker:
                                         small_template_width=small_template_width,
                                         small_template_require_initial=small_template_require_initial)
         self.high_model = high_model
+        self.fallback_search_factor = (None if fallback_search_factor is None
+                                       else float(fallback_search_factor))
+        self.fallback_quality_threshold = float(fallback_quality_threshold)
+        self.fallback_min_gain = float(fallback_min_gain)
+        self.fallback_cooldown = int(fallback_cooldown)
+        self.fallback_run = int(fallback_run)
+        self.fallback_start_frame = int(fallback_start_frame)
         self.seam_recenter = bool(seam_recenter)
         self.polar_rectify = bool(polar_rectify)
         self.polar_latitude_threshold = float(polar_latitude_threshold)
@@ -384,6 +410,12 @@ class MotionAdaptiveTracker:
             current = [self.base.state[0] % self.base.width, self.base.state[1],
                        self.base.state[2], self.base.state[3]]
             self.high = OpenVinoB224Tracker(self.high_model, search_size=224, template_size=128,
+                                            fallback_search_factor=self.fallback_search_factor,
+                                            fallback_quality_threshold=self.fallback_quality_threshold,
+                                            fallback_min_gain=self.fallback_min_gain,
+                                            fallback_cooldown=self.fallback_cooldown,
+                                            fallback_run=self.fallback_run,
+                                            fallback_start_frame=self.fallback_start_frame,
                                             seam_recenter=self.seam_recenter,
                                             polar_rectify=self.polar_rectify,
                                             polar_latitude_threshold=self.polar_latitude_threshold,
@@ -429,6 +461,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fallback-min-gain", type=float, default=0.0,
                         help="minimum Hann-windowed response gain required to accept fallback")
     parser.add_argument("--fallback-cooldown", type=int, default=1)
+    parser.add_argument("--fallback-run", type=int, default=1,
+                        help="consecutive weak primary responses before probing fallback")
+    parser.add_argument("--fallback-start-frame", type=int, default=0)
     parser.add_argument("--seam-recenter", action="store_true",
                         help="recenter the internal ERP box in the middle tile after each update")
     parser.add_argument("--polar-rectify", action="store_true",
@@ -468,10 +503,16 @@ def main(argv: list[str] | None = None) -> int:
     if args.motion_adaptive:
         def tracker_factory(**_kwargs):
             tracker_holder["tracker"] = MotionAdaptiveTracker(
-            compiled, compiled_high, warmup=args.motion_warmup,
+                compiled, compiled_high, warmup=args.motion_warmup,
                 threshold_deg=args.motion_threshold_deg,
                 quality_threshold=args.quality_threshold, quality_run=args.quality_run,
                 switch_deadline=args.switch_deadline,
+                fallback_search_factor=args.fallback_search_factor,
+                fallback_quality_threshold=args.fallback_quality_threshold,
+                fallback_min_gain=args.fallback_min_gain,
+                fallback_cooldown=args.fallback_cooldown,
+                fallback_run=args.fallback_run,
+                fallback_start_frame=args.fallback_start_frame,
                 seam_recenter=args.seam_recenter,
                 polar_rectify=args.polar_rectify,
                 polar_latitude_threshold=args.polar_latitude_threshold,
@@ -494,6 +535,8 @@ def main(argv: list[str] | None = None) -> int:
                 fallback_quality_threshold=args.fallback_quality_threshold,
                 fallback_min_gain=args.fallback_min_gain,
                 fallback_cooldown=args.fallback_cooldown,
+                fallback_run=args.fallback_run,
+                fallback_start_frame=args.fallback_start_frame,
                 seam_recenter=args.seam_recenter,
                 polar_rectify=args.polar_rectify,
                 polar_latitude_threshold=args.polar_latitude_threshold,
@@ -529,6 +572,8 @@ def main(argv: list[str] | None = None) -> int:
     metrics["fallback_quality_threshold"] = args.fallback_quality_threshold
     metrics["fallback_min_gain"] = args.fallback_min_gain
     metrics["fallback_cooldown"] = args.fallback_cooldown
+    metrics["fallback_run"] = args.fallback_run
+    metrics["fallback_start_frame"] = args.fallback_start_frame
     metrics["seam_recenter"] = args.seam_recenter
     metrics["polar_rectify"] = args.polar_rectify
     metrics["polar_latitude_threshold"] = args.polar_latitude_threshold
@@ -543,6 +588,10 @@ def main(argv: list[str] | None = None) -> int:
         metrics["fallback_calls"] = tracker_holder["tracker"].fallback_calls
         metrics["fallback_selected"] = tracker_holder["tracker"].fallback_selected
         metrics["polar_sample_count"] = tracker_holder["tracker"].polar_sample_count
+    elif args.motion_adaptive and "tracker" in tracker_holder:
+        metrics["fallback_calls"] = tracker_holder["tracker"].base.fallback_calls
+        metrics["fallback_selected"] = tracker_holder["tracker"].base.fallback_selected
+        metrics["polar_sample_count"] = tracker_holder["tracker"].base.polar_sample_count
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     np.savetxt(out / "results_erp.txt", pred_erp, fmt="%.6f", delimiter=",")
