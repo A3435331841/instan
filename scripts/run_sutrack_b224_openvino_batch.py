@@ -58,6 +58,7 @@ def make_parser():
     ap.add_argument("--search-factor", type=float, default=4.0)
     ap.add_argument("--search-factor-mode",
                     choices=["fixed", "moderate_fov", "large_fov"], default="fixed")
+    ap.add_argument("--large-fov-fallback-search-factor", type=float, default=5.0)
     ap.add_argument("--template-factor", type=float, default=2.0)
     ap.add_argument("--search-size", type=int, default=224)
     ap.add_argument("--template-size", type=int, default=112)
@@ -69,6 +70,7 @@ def make_parser():
     ap.add_argument("--fallback-cooldown", type=int, default=1)
     ap.add_argument("--fallback-run", type=int, default=1)
     ap.add_argument("--fallback-start-frame", type=int, default=0)
+    ap.add_argument("--fallback-motion-lead", type=float, default=0.0)
     ap.add_argument("--anchor-update-threshold", type=float, default=None)
     ap.add_argument("--auto-freeze-scale-threshold", type=float, default=None)
     ap.add_argument("--auto-freeze-scale-window", type=int, default=40)
@@ -78,6 +80,9 @@ def make_parser():
     ap.add_argument("--auto-freeze-scale-step-median-max", type=float, default=0.018)
     ap.add_argument("--auto-freeze-scale-step-override", type=float, default=None)
     ap.add_argument("--auto-freeze-max-frame", type=int, default=None)
+    ap.add_argument("--scale-clamp-factor", type=float, default=None)
+    ap.add_argument("--motion-predict-horizon", type=float, default=0.0)
+    ap.add_argument("--motion-velocity-alpha", type=float, default=0.4)
     ap.add_argument("--seam-recenter", action="store_true")
     ap.add_argument("--polar-rectify", action="store_true")
     ap.add_argument("--polar-latitude-threshold", type=float, default=55.0)
@@ -139,6 +144,7 @@ def main(argv=None):
                     fallback_cooldown=args.fallback_cooldown,
                     fallback_run=args.fallback_run,
                     fallback_start_frame=args.fallback_start_frame,
+                    fallback_motion_lead=args.fallback_motion_lead,
                     anchor_update_threshold=args.anchor_update_threshold,
                     auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
                     auto_freeze_scale_window=args.auto_freeze_scale_window,
@@ -148,6 +154,10 @@ def main(argv=None):
                     auto_freeze_scale_step_median_max=args.auto_freeze_scale_step_median_max,
                     auto_freeze_scale_step_override=args.auto_freeze_scale_step_override,
                     auto_freeze_max_frame=args.auto_freeze_max_frame,
+                    scale_clamp_factor=args.scale_clamp_factor,
+                    motion_predict_horizon=args.motion_predict_horizon,
+                    motion_velocity_alpha=args.motion_velocity_alpha,
+                    large_fov_fallback_search_factor=args.large_fov_fallback_search_factor,
                     seam_recenter=args.seam_recenter,
                     polar_rectify=args.polar_rectify,
                     polar_latitude_threshold=args.polar_latitude_threshold,
@@ -178,6 +188,7 @@ def main(argv=None):
                     fallback_cooldown=args.fallback_cooldown,
                     fallback_run=args.fallback_run,
                     fallback_start_frame=args.fallback_start_frame,
+                    fallback_motion_lead=args.fallback_motion_lead,
                     anchor_update_threshold=args.anchor_update_threshold,
                     auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
                     auto_freeze_scale_window=args.auto_freeze_scale_window,
@@ -187,6 +198,10 @@ def main(argv=None):
                     auto_freeze_scale_step_median_max=args.auto_freeze_scale_step_median_max,
                     auto_freeze_scale_step_override=args.auto_freeze_scale_step_override,
                     auto_freeze_max_frame=args.auto_freeze_max_frame,
+                    scale_clamp_factor=args.scale_clamp_factor,
+                    motion_predict_horizon=args.motion_predict_horizon,
+                    motion_velocity_alpha=args.motion_velocity_alpha,
+                    large_fov_fallback_search_factor=args.large_fov_fallback_search_factor,
                     seam_recenter=args.seam_recenter,
                     polar_rectify=args.polar_rectify,
                     polar_latitude_threshold=args.polar_latitude_threshold,
@@ -217,6 +232,7 @@ def main(argv=None):
             tracker = holder.get("tracker")
             if args.motion_adaptive:
                 metrics["active_search_factor"] = tracker.base.active_search_factor
+                metrics["active_fallback_search_factor"] = tracker.base.active_fallback_search_factor
                 metrics["fallback_calls"] = tracker.base.fallback_calls
                 metrics["fallback_selected"] = tracker.base.fallback_selected
                 metrics["polar_sample_count"] = tracker.base.polar_sample_count
@@ -225,6 +241,7 @@ def main(argv=None):
                 metrics["switch_frame"] = tracker.switch_frame
             else:
                 metrics["active_search_factor"] = tracker.active_search_factor
+                metrics["active_fallback_search_factor"] = tracker.active_fallback_search_factor
                 metrics["fallback_calls"] = tracker.fallback_calls
                 metrics["fallback_selected"] = tracker.fallback_selected
                 metrics["polar_sample_count"] = tracker.polar_sample_count
@@ -247,6 +264,7 @@ def main(argv=None):
         keys = ["sequence", "n_frames", "n_scored", "n_gt_absent", "auc", "sr",
                 "auc_dual", "sr_dual", "e2e_fps", "tracker_fps", "switch_frame",
                 "fallback_calls", "fallback_selected", "active_search_factor",
+                "active_fallback_search_factor",
                 "updates_frozen", "updates_frozen_frame"]
         with (out_root / "summary.csv").open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=keys)

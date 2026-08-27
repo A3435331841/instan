@@ -95,6 +95,18 @@ def recenter_horizontal(box, width: int):
     return [center - 0.5 * w, y, w, h]
 
 
+def clamp_state_scale(box, previous, max_ratio: float):
+    """Limit one-frame width/height changes while preserving predicted center."""
+    x, y, w, h = [float(v) for v in box]
+    px, py, pw, ph = [float(v) for v in previous]
+    ratio = max(1.0, float(max_ratio))
+    nw = min(max(w, pw / ratio), pw * ratio)
+    nh = min(max(h, ph / ratio), ph * ratio)
+    cx = x + 0.5 * w
+    cy = y + 0.5 * h
+    return [cx - 0.5 * nw, cy - 0.5 * nh, nw, nh]
+
+
 class OpenVinoB224Tracker:
     def __init__(self, compiled_model, search_size=224, template_size=112,
                  search_factor=4.0, template_factor=2.0,
@@ -102,6 +114,7 @@ class OpenVinoB224Tracker:
                  search_factor_mode="fixed", fallback_search_factor=None,
                  fallback_quality_threshold=0.45, fallback_min_gain=0.0,
                  fallback_cooldown=1, fallback_run=1, fallback_start_frame=0,
+                 fallback_motion_lead=0.0,
                  anchor_update_threshold=None,
                  auto_freeze_scale_threshold=None, auto_freeze_scale_window=40,
                  auto_freeze_quality_slope=None,
@@ -110,6 +123,9 @@ class OpenVinoB224Tracker:
                  auto_freeze_scale_step_median_max=0.018,
                  auto_freeze_scale_step_override=None,
                  auto_freeze_max_frame=None,
+                 scale_clamp_factor=None,
+                 motion_predict_horizon=0.0, motion_velocity_alpha=0.4,
+                 large_fov_fallback_search_factor=5.0,
                  seam_recenter=False,
                  polar_rectify=False, polar_latitude_threshold=55.0,
                  polar_aspect_max=2.5, polar_small_width=100.0,
@@ -124,6 +140,7 @@ class OpenVinoB224Tracker:
         self.frame_id = 0
         self.search_factor = float(search_factor)
         self.search_factor_mode = str(search_factor_mode)
+        self.large_fov_fallback_search_factor = float(large_fov_fallback_search_factor)
         self.active_search_factor = self.search_factor
         self.template_factor = float(template_factor)
         self.search_size = int(search_size)
@@ -137,6 +154,8 @@ class OpenVinoB224Tracker:
         self.fallback_cooldown = max(1, int(fallback_cooldown))
         self.fallback_run = max(1, int(fallback_run))
         self.fallback_start_frame = max(0, int(fallback_start_frame))
+        self.fallback_motion_lead = max(0.0, float(fallback_motion_lead))
+        self.active_fallback_search_factor = self.fallback_search_factor
         self.fallback_low_run = 0
         self.anchor_update_threshold = (None if anchor_update_threshold is None
                                         else float(anchor_update_threshold))
@@ -153,10 +172,16 @@ class OpenVinoB224Tracker:
                                                 else float(auto_freeze_scale_step_override))
         self.auto_freeze_max_frame = (None if auto_freeze_max_frame is None
                                       else int(auto_freeze_max_frame))
+        self.scale_clamp_factor = (None if scale_clamp_factor is None
+                                   else max(1.0, float(scale_clamp_factor)))
+        self.motion_predict_horizon = max(0.0, float(motion_predict_horizon))
+        self.motion_velocity_alpha = float(np.clip(motion_velocity_alpha, 0.0, 1.0))
+        self.velocity = np.zeros(2, dtype=np.float32)
         self.area_history = []
         self.quality_history = []
         self.updates_frozen = False
         self.updates_frozen_frame = None
+        self.velocity = np.zeros(2, dtype=np.float32)
         self.anchor_template = None
         self.last_anchor_similarity = 1.0
         self.seam_recenter = bool(seam_recenter)
@@ -231,6 +256,7 @@ class OpenVinoB224Tracker:
         self.height, self.width = frame_rgb.shape[:2]
         self.initial_latitude = self._latitude(erp_box)
         self.initial_target_width = float(erp_box[2])
+        self.active_fallback_search_factor = self.fallback_search_factor
         if self.search_factor_mode == "moderate_fov":
             # Geometry-only conditional crop: the factor-3.5 ablation helped
             # moderate-FOV OD-dominant scenes but harmed very wide/small-FOV
@@ -260,6 +286,8 @@ class OpenVinoB224Tracker:
                 fov_h, fov_v = float(init_bfov[2]), float(init_bfov[3])
             if 90.0 <= fov_h < 150.0 and fov_v >= 100.0:
                 self.active_search_factor = 2.0
+                if self.fallback_search_factor is not None:
+                    self.active_fallback_search_factor = self.large_fov_fallback_search_factor
             else:
                 self.active_search_factor = 4.0
         elif self.search_factor_mode != "fixed":
@@ -282,7 +310,7 @@ class OpenVinoB224Tracker:
         self.updates_frozen = False
         self.updates_frozen_frame = None
 
-    def _infer_candidate(self, tiled, factor):
+    def _infer_candidate(self, tiled, factor, center_state=None):
         """Run one pure candidate search without mutating tracker state.
 
         The extra candidate is deliberately evaluated against the same two
@@ -290,7 +318,9 @@ class OpenVinoB224Tracker:
         the lightweight analogue of ODTrack's candidate-elimination idea: only
         frames whose primary response is weak pay for a second crop.
         """
-        patch, rf = self._sample(tiled, self.state, factor, self.search_size)
+        if center_state is None:
+            center_state = self.state
+        patch, rf = self._sample(tiled, center_state, factor, self.search_size)
         inputs = {self.template_names[0]: self.templates[0], self.template_names[1]: self.templates[1],
                   self.anno_names[0]: self.annos[0][None, :], self.anno_names[1]: self.annos[1][None, :],
                   self.search_name: preprocess(patch)}
@@ -312,14 +342,16 @@ class OpenVinoB224Tracker:
         pred = np.asarray([normalized[0] * scale_x, normalized[1] * scale_y,
                            normalized[2] * scale_x, normalized[3] * scale_y],
                           dtype=np.float32)
-        prev_cx = self.state[0] + 0.5 * self.state[2]
-        prev_cy = self.state[1] + 0.5 * self.state[3]
+        prev_cx = center_state[0] + 0.5 * center_state[2]
+        prev_cy = center_state[1] + 0.5 * center_state[3]
         half_x = 0.5 * float(self.search_size) / float(rf[0])
         half_y = 0.5 * float(self.search_size) / float(rf[1])
         state = [float(pred[0] + prev_cx - half_x - 0.5 * pred[2]),
                  float(pred[1] + prev_cy - half_y - 0.5 * pred[3]),
                  float(pred[2]), float(pred[3])]
         state = clip_box(state, self.height, 3 * self.width, margin=10)
+        if self.scale_clamp_factor is not None:
+            state = clamp_state_scale(state, self.state, self.scale_clamp_factor)
         if self.seam_recenter:
             state = recenter_horizontal(state, self.width)
         return {"state": state, "conf": conf, "factor": float(factor)}
@@ -341,7 +373,12 @@ class OpenVinoB224Tracker:
         tiled = np.concatenate([frame_rgb, frame_rgb, frame_rgb], axis=1)
         prev_cx = self.state[0] + 0.5 * self.state[2]
         prev_cy = self.state[1] + 0.5 * self.state[3]
-        primary = self._infer_candidate(tiled, self.active_search_factor)
+        center_state = self.state
+        if self.motion_predict_horizon > 0.0:
+            center_state = [self.state[0] + float(self.velocity[0]) * self.motion_predict_horizon,
+                            self.state[1] + float(self.velocity[1]) * self.motion_predict_horizon,
+                            self.state[2], self.state[3]]
+        primary = self._infer_candidate(tiled, self.active_search_factor, center_state)
         chosen = primary
         self.last_fallback_used = False
         if primary["conf"] <= self.fallback_quality_threshold:
@@ -352,9 +389,15 @@ class OpenVinoB224Tracker:
                 self.frame_id >= self.fallback_start_frame and
                 self.frame_id % self.fallback_cooldown == 0 and
                 self.fallback_low_run >= self.fallback_run and
-                abs(self.fallback_search_factor - self.active_search_factor) > 1e-6):
+                self.active_fallback_search_factor is not None and
+                abs(self.active_fallback_search_factor - self.active_search_factor) > 1e-6):
             self.fallback_calls += 1
-            alternate = self._infer_candidate(tiled, self.fallback_search_factor)
+            fallback_center = center_state
+            if self.fallback_motion_lead > 0.0:
+                fallback_center = [center_state[0] + float(self.velocity[0]) * self.fallback_motion_lead,
+                                   center_state[1] + float(self.velocity[1]) * self.fallback_motion_lead,
+                                   center_state[2], center_state[3]]
+            alternate = self._infer_candidate(tiled, self.active_fallback_search_factor, fallback_center)
             if alternate["conf"] >= primary["conf"] + self.fallback_min_gain:
                 chosen = alternate
                 self.fallback_selected += 1
@@ -417,6 +460,11 @@ class OpenVinoB224Tracker:
         dy = abs(new_cy - prev_cy)
         self.last_motion_deg = float(np.hypot(dx * 360.0 / self.width,
                                                dy * 180.0 / self.height))
+        measured = np.asarray([((new_cx - prev_cx + 0.5 * self.width) % self.width)
+                               - 0.5 * self.width,
+                               new_cy - prev_cy], dtype=np.float32)
+        self.velocity = ((1.0 - self.motion_velocity_alpha) * self.velocity +
+                         self.motion_velocity_alpha * measured)
         self.last_quality = conf
         self.frame_id += 1
         if (self.update_interval > 0 and self.frame_id % self.update_interval == 0 and
@@ -446,6 +494,7 @@ class MotionAdaptiveTracker:
                  fallback_search_factor=None, fallback_quality_threshold=0.45,
                  fallback_min_gain=0.0, fallback_cooldown=1, fallback_run=1,
                  fallback_start_frame=0,
+                 fallback_motion_lead=0.0,
                  anchor_update_threshold=None,
                  auto_freeze_scale_threshold=None, auto_freeze_scale_window=40,
                  auto_freeze_quality_slope=None,
@@ -454,6 +503,9 @@ class MotionAdaptiveTracker:
                  auto_freeze_scale_step_median_max=0.018,
                  auto_freeze_scale_step_override=None,
                  auto_freeze_max_frame=None,
+                 scale_clamp_factor=None,
+                 motion_predict_horizon=0.0, motion_velocity_alpha=0.4,
+                 large_fov_fallback_search_factor=5.0,
                  search_factor=4.0, search_factor_mode="fixed",
                  seam_recenter=False, polar_rectify=False,
                  polar_latitude_threshold=55.0, polar_aspect_max=2.5,
@@ -469,6 +521,7 @@ class MotionAdaptiveTracker:
                                         fallback_cooldown=fallback_cooldown,
                                         fallback_run=fallback_run,
                                         fallback_start_frame=fallback_start_frame,
+                                        fallback_motion_lead=fallback_motion_lead,
                                         anchor_update_threshold=anchor_update_threshold,
                                         auto_freeze_scale_threshold=auto_freeze_scale_threshold,
                                         auto_freeze_scale_window=auto_freeze_scale_window,
@@ -478,6 +531,10 @@ class MotionAdaptiveTracker:
                                         auto_freeze_scale_step_median_max=auto_freeze_scale_step_median_max,
                                         auto_freeze_scale_step_override=auto_freeze_scale_step_override,
                                         auto_freeze_max_frame=auto_freeze_max_frame,
+                                        scale_clamp_factor=scale_clamp_factor,
+                                        motion_predict_horizon=motion_predict_horizon,
+                                        motion_velocity_alpha=motion_velocity_alpha,
+                                        large_fov_fallback_search_factor=large_fov_fallback_search_factor,
                                         seam_recenter=seam_recenter,
                                         polar_rectify=polar_rectify,
                                         polar_latitude_threshold=polar_latitude_threshold,
@@ -498,6 +555,7 @@ class MotionAdaptiveTracker:
         self.fallback_cooldown = int(fallback_cooldown)
         self.fallback_run = int(fallback_run)
         self.fallback_start_frame = int(fallback_start_frame)
+        self.fallback_motion_lead = max(0.0, float(fallback_motion_lead))
         self.anchor_update_threshold = (None if anchor_update_threshold is None
                                        else float(anchor_update_threshold))
         self.auto_freeze_scale_threshold = (None if auto_freeze_scale_threshold is None
@@ -513,6 +571,11 @@ class MotionAdaptiveTracker:
                                                 else float(auto_freeze_scale_step_override))
         self.auto_freeze_max_frame = (None if auto_freeze_max_frame is None
                                       else int(auto_freeze_max_frame))
+        self.scale_clamp_factor = (None if scale_clamp_factor is None
+                                   else max(1.0, float(scale_clamp_factor)))
+        self.motion_predict_horizon = max(0.0, float(motion_predict_horizon))
+        self.motion_velocity_alpha = float(np.clip(motion_velocity_alpha, 0.0, 1.0))
+        self.large_fov_fallback_search_factor = float(large_fov_fallback_search_factor)
         self.seam_recenter = bool(seam_recenter)
         self.polar_rectify = bool(polar_rectify)
         self.polar_latitude_threshold = float(polar_latitude_threshold)
@@ -571,6 +634,7 @@ class MotionAdaptiveTracker:
                                             fallback_cooldown=self.fallback_cooldown,
                                             fallback_run=self.fallback_run,
                                             fallback_start_frame=self.fallback_start_frame,
+                                            fallback_motion_lead=self.fallback_motion_lead,
                                             anchor_update_threshold=self.anchor_update_threshold,
                                             auto_freeze_scale_threshold=self.auto_freeze_scale_threshold,
                                             auto_freeze_scale_window=self.auto_freeze_scale_window,
@@ -580,6 +644,10 @@ class MotionAdaptiveTracker:
                                             auto_freeze_scale_step_median_max=self.auto_freeze_scale_step_median_max,
                                             auto_freeze_scale_step_override=self.auto_freeze_scale_step_override,
                                             auto_freeze_max_frame=self.auto_freeze_max_frame,
+                                            scale_clamp_factor=self.scale_clamp_factor,
+                                            motion_predict_horizon=self.motion_predict_horizon,
+                                            motion_velocity_alpha=self.motion_velocity_alpha,
+                                            large_fov_fallback_search_factor=self.large_fov_fallback_search_factor,
                                             seam_recenter=self.seam_recenter,
                                             polar_rectify=self.polar_rectify,
                                             polar_latitude_threshold=self.polar_latitude_threshold,
@@ -614,6 +682,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", required=True)
     parser.add_argument("--search-factor", type=float, default=4.0)
     parser.add_argument("--search-factor-mode", choices=["fixed", "moderate_fov", "large_fov"], default="fixed")
+    parser.add_argument("--large-fov-fallback-search-factor", type=float, default=5.0)
     parser.add_argument("--template-factor", type=float, default=2.0)
     parser.add_argument("--search-size", type=int, default=224)
     parser.add_argument("--template-size", type=int, default=112)
@@ -628,6 +697,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--fallback-run", type=int, default=1,
                         help="consecutive weak primary responses before probing fallback")
     parser.add_argument("--fallback-start-frame", type=int, default=0)
+    parser.add_argument("--fallback-motion-lead", type=float, default=0.0,
+                        help="optional historical-velocity lead for fallback crop only")
     parser.add_argument("--anchor-update-threshold", type=float, default=None,
                         help="minimum NCC to immutable first-frame anchor before accepting a template update")
     parser.add_argument("--auto-freeze-scale-threshold", type=float, default=None,
@@ -641,6 +712,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--auto-freeze-scale-step-median-max", type=float, default=0.018)
     parser.add_argument("--auto-freeze-scale-step-override", type=float, default=None)
     parser.add_argument("--auto-freeze-max-frame", type=int, default=None)
+    parser.add_argument("--scale-clamp-factor", type=float, default=None,
+                        help="optional max one-frame width/height multiplier")
+    parser.add_argument("--motion-predict-horizon", type=float, default=0.0,
+                        help="constant-velocity search-center lead in frames")
+    parser.add_argument("--motion-velocity-alpha", type=float, default=0.4)
     parser.add_argument("--seam-recenter", action="store_true",
                         help="recenter the internal ERP box in the middle tile after each update")
     parser.add_argument("--polar-rectify", action="store_true",
@@ -692,6 +768,7 @@ def main(argv: list[str] | None = None) -> int:
                 fallback_cooldown=args.fallback_cooldown,
                 fallback_run=args.fallback_run,
                 fallback_start_frame=args.fallback_start_frame,
+                fallback_motion_lead=args.fallback_motion_lead,
                 anchor_update_threshold=args.anchor_update_threshold,
                 auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
                 auto_freeze_scale_window=args.auto_freeze_scale_window,
@@ -701,6 +778,10 @@ def main(argv: list[str] | None = None) -> int:
                 auto_freeze_scale_step_median_max=args.auto_freeze_scale_step_median_max,
                 auto_freeze_scale_step_override=args.auto_freeze_scale_step_override,
                 auto_freeze_max_frame=args.auto_freeze_max_frame,
+                scale_clamp_factor=args.scale_clamp_factor,
+                motion_predict_horizon=args.motion_predict_horizon,
+                motion_velocity_alpha=args.motion_velocity_alpha,
+                large_fov_fallback_search_factor=args.large_fov_fallback_search_factor,
                 seam_recenter=args.seam_recenter,
                 polar_rectify=args.polar_rectify,
                 polar_latitude_threshold=args.polar_latitude_threshold,
@@ -725,6 +806,7 @@ def main(argv: list[str] | None = None) -> int:
                 fallback_cooldown=args.fallback_cooldown,
                 fallback_run=args.fallback_run,
                 fallback_start_frame=args.fallback_start_frame,
+                fallback_motion_lead=args.fallback_motion_lead,
                 anchor_update_threshold=args.anchor_update_threshold,
                 auto_freeze_scale_threshold=args.auto_freeze_scale_threshold,
                 auto_freeze_scale_window=args.auto_freeze_scale_window,
@@ -734,6 +816,10 @@ def main(argv: list[str] | None = None) -> int:
                 auto_freeze_scale_step_median_max=args.auto_freeze_scale_step_median_max,
                 auto_freeze_scale_step_override=args.auto_freeze_scale_step_override,
                 auto_freeze_max_frame=args.auto_freeze_max_frame,
+                scale_clamp_factor=args.scale_clamp_factor,
+                motion_predict_horizon=args.motion_predict_horizon,
+                motion_velocity_alpha=args.motion_velocity_alpha,
+                large_fov_fallback_search_factor=args.large_fov_fallback_search_factor,
                 seam_recenter=args.seam_recenter,
                 polar_rectify=args.polar_rectify,
                 polar_latitude_threshold=args.polar_latitude_threshold,
@@ -771,6 +857,7 @@ def main(argv: list[str] | None = None) -> int:
     metrics["fallback_cooldown"] = args.fallback_cooldown
     metrics["fallback_run"] = args.fallback_run
     metrics["fallback_start_frame"] = args.fallback_start_frame
+    metrics["fallback_motion_lead"] = args.fallback_motion_lead
     metrics["anchor_update_threshold"] = args.anchor_update_threshold
     metrics["auto_freeze_scale_threshold"] = args.auto_freeze_scale_threshold
     metrics["auto_freeze_scale_window"] = args.auto_freeze_scale_window
@@ -780,6 +867,10 @@ def main(argv: list[str] | None = None) -> int:
     metrics["auto_freeze_scale_step_median_max"] = args.auto_freeze_scale_step_median_max
     metrics["auto_freeze_scale_step_override"] = args.auto_freeze_scale_step_override
     metrics["auto_freeze_max_frame"] = args.auto_freeze_max_frame
+    metrics["scale_clamp_factor"] = args.scale_clamp_factor
+    metrics["motion_predict_horizon"] = args.motion_predict_horizon
+    metrics["motion_velocity_alpha"] = args.motion_velocity_alpha
+    metrics["large_fov_fallback_search_factor"] = args.large_fov_fallback_search_factor
     metrics["seam_recenter"] = args.seam_recenter
     metrics["polar_rectify"] = args.polar_rectify
     metrics["polar_latitude_threshold"] = args.polar_latitude_threshold
@@ -792,6 +883,7 @@ def main(argv: list[str] | None = None) -> int:
     metrics["small_template_require_initial"] = args.small_template_require_initial
     if not args.motion_adaptive and "tracker" in tracker_holder:
         metrics["active_search_factor"] = tracker_holder["tracker"].active_search_factor
+        metrics["active_fallback_search_factor"] = tracker_holder["tracker"].active_fallback_search_factor
         metrics["fallback_calls"] = tracker_holder["tracker"].fallback_calls
         metrics["fallback_selected"] = tracker_holder["tracker"].fallback_selected
         metrics["polar_sample_count"] = tracker_holder["tracker"].polar_sample_count
@@ -799,6 +891,7 @@ def main(argv: list[str] | None = None) -> int:
         metrics["updates_frozen_frame"] = tracker_holder["tracker"].updates_frozen_frame
     elif args.motion_adaptive and "tracker" in tracker_holder:
         metrics["active_search_factor"] = tracker_holder["tracker"].base.active_search_factor
+        metrics["active_fallback_search_factor"] = tracker_holder["tracker"].base.active_fallback_search_factor
         metrics["fallback_calls"] = tracker_holder["tracker"].base.fallback_calls
         metrics["fallback_selected"] = tracker_holder["tracker"].base.fallback_selected
         metrics["polar_sample_count"] = tracker_holder["tracker"].base.polar_sample_count
