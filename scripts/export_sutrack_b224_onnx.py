@@ -44,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--config", default="sutrack_b224")
     parser.add_argument("--output", required=True)
     parser.add_argument("--opset", type=int, default=17)
+    parser.add_argument("--search-size", type=int, default=224)
+    parser.add_argument("--template-size", type=int, default=112)
     args = parser.parse_args(argv)
 
     # Reuse the production adapter's strict checkpoint loading and CPU clip
@@ -52,6 +54,8 @@ def main(argv: list[str] | None = None) -> int:
         gpu="0", force_cpu=True,
         sutrack_workspace=args.workspace, sutrack_ckpt=args.checkpoint,
         sutrack_config=args.config, sutrack_amp=False, sutrack_lora_ckpt=None,
+        sutrack_search_size=args.search_size if args.search_size != 224 else None,
+        sutrack_template_size=args.template_size if args.template_size != 112 else None,
     )
     adapter = build_sutrack_tracker(namespace)
     network = adapter.tracker.network.eval().cpu()
@@ -59,11 +63,11 @@ def main(argv: list[str] | None = None) -> int:
         tokens = torch.zeros((1, 77), dtype=torch.long)
         text_src = network.forward_textencoder(tokens).cpu()
     graph = FrameGraph(network, text_src).eval()
-    template0 = torch.zeros((1, 6, 112, 112), dtype=torch.float32)
-    template1 = torch.zeros((1, 6, 112, 112), dtype=torch.float32)
+    template0 = torch.zeros((1, 6, args.template_size, args.template_size), dtype=torch.float32)
+    template1 = torch.zeros((1, 6, args.template_size, args.template_size), dtype=torch.float32)
     anno0 = torch.tensor([[0.25, 0.25, 0.50, 0.50]], dtype=torch.float32)
     anno1 = anno0.clone()
-    search = torch.zeros((1, 6, 224, 224), dtype=torch.float32)
+    search = torch.zeros((1, 6, args.search_size, args.search_size), dtype=torch.float32)
     output = Path(args.output).resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     print(f"[export] output={output} opset={args.opset}", flush=True)

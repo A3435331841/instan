@@ -215,6 +215,8 @@ def build_sutrack_tracker(args):
     os.environ.setdefault("CUDA_VISIBLE_DEVICES", str(args.gpu))
     _clip_load_original = None
     _clip_state = None
+    _torch_load_original = None
+    _checkpoint_override = None
     if args.force_cpu:
         # SUTrack's upstream constructor unconditionally calls .cuda() and
         # its text encoder calls clip.load("ViT-L/14"), which would otherwise
@@ -268,6 +270,62 @@ def build_sutrack_tracker(args):
     from lib.test.utils.params import TrackerParams
 
     update_config_from_file(workspace / "experiments" / "sutrack" / f"{args.sutrack_config}.yaml")
+    requested_search = getattr(args, "sutrack_search_size", None)
+    requested_template = getattr(args, "sutrack_template_size", None)
+    if requested_search is not None:
+        requested_search = int(requested_search)
+        if requested_search <= 0 or requested_search % 16:
+            raise ValueError("sutrack_search_size must be a positive multiple of 16")
+        cfg.DATA.SEARCH.SIZE = requested_search
+        cfg.TEST.SEARCH_SIZE = requested_search
+    if requested_template is not None:
+        requested_template = int(requested_template)
+        if requested_template <= 0 or requested_template % 16:
+            raise ValueError("sutrack_template_size must be a positive multiple of 16")
+        cfg.DATA.TEMPLATE.SIZE = requested_template
+        cfg.TEST.TEMPLATE_SIZE = requested_template
+
+    # A larger graph changes only the absolute positional embedding shape.  We
+    # interpolate the B224 search (14x14) and template (7x7) halves, then feed
+    # the adjusted state to the upstream strict loader in memory.  No copied
+    # checkpoint is written; the default 224/112 path is unchanged.
+    if requested_search is not None or requested_template is not None:
+        import torch as _torch
+        ckpt_path = str(Path(args.sutrack_ckpt).resolve())
+        payload = _torch.load(ckpt_path, map_location="cpu", weights_only=False)
+        net_state = payload.get("net", payload)
+        pos_key = "encoder.body.pos_embed"
+        if pos_key not in net_state:
+            raise RuntimeError(f"checkpoint has no {pos_key}")
+        pos = net_state[pos_key]
+        old_s, old_t = 14, 7
+        if tuple(pos.shape[1:]) != (old_s * old_s + old_t * old_t, pos.shape[2]):
+            raise RuntimeError(f"unexpected B224 positional embedding shape: {tuple(pos.shape)}")
+        target_s = int(cfg.DATA.SEARCH.SIZE) // 16
+        target_t = int(cfg.DATA.TEMPLATE.SIZE) // 16
+
+        def _resize_pos(segment, side):
+            if segment.shape[-2:] == (side, side):
+                return segment
+            return _torch.nn.functional.interpolate(
+                segment, size=(side, side), mode="bicubic", align_corners=True)
+
+        ps = pos[:, :old_s * old_s, :].reshape(1, old_s, old_s, -1).permute(0, 3, 1, 2)
+        pt = pos[:, old_s * old_s:, :].reshape(1, old_t, old_t, -1).permute(0, 3, 1, 2)
+        ps = _resize_pos(ps, target_s).permute(0, 2, 3, 1).reshape(1, target_s * target_s, -1)
+        pt = _resize_pos(pt, target_t).permute(0, 2, 3, 1).reshape(1, target_t * target_t, -1)
+        adjusted = dict(net_state)
+        adjusted[pos_key] = _torch.cat([ps, pt], dim=1)
+        _checkpoint_override = dict(payload)
+        _checkpoint_override["net"] = adjusted
+        _torch_load_original = _torch.load
+
+        def _load_adjusted_checkpoint(file, *load_args, **load_kwargs):
+            if str(file) == ckpt_path:
+                return _checkpoint_override
+            return _torch_load_original(file, *load_args, **load_kwargs)
+
+        _torch.load = _load_adjusted_checkpoint
     # We load a full SUTrack checkpoint immediately after model construction.
     # Avoid requiring the separate iTPN pretrain file during adapter smoke/eval.
     cfg.MODEL.ENCODER.PRETRAIN_TYPE = ""
@@ -290,7 +348,15 @@ def build_sutrack_tracker(args):
 
     class SUTrackAdapter:
         def __init__(self):
-            self.tracker = SUTRACK(params, "got10k")
+            try:
+                self.tracker = SUTRACK(params, "got10k")
+            finally:
+                if _torch_load_original is not None:
+                    import torch as _torch
+                    _torch.load = _torch_load_original
+            # Drop the temporary interpolated state before tracking starts.
+            nonlocal _checkpoint_override
+            _checkpoint_override = None
             if _clip_load_original is not None:
                 import clip as _clip
                 _clip.load = _clip_load_original
@@ -880,7 +946,7 @@ def run_sequence(seq_rel, data_root, tracker_factory, max_frames=None):
 
     tracker = tracker_factory(gt_erp=gt_erp)
     init_erp = erp_bbox_from_bfov(BFoV(*init_bfov), W, H)
-    tracker.init(cv.cvtColor(first, cv.COLOR_BGR2RGB), init_erp)
+    tracker.init(cv.cvtColor(first, cv.COLOR_BGR2RGB), init_erp, init_bfov=init_bfov)
 
     pred_erp = np.zeros((limit, 4), dtype=float)
     pred_erp[0] = init_erp
@@ -1040,6 +1106,10 @@ def main(argv=None):
     ap.add_argument("--sutrack-workspace", default="/opt/sutrack")
     ap.add_argument("--sutrack-ckpt", default="/opt/models/SUTRACK_ep0300.pth.tar")
     ap.add_argument("--sutrack-config", default="sutrack_b224")
+    ap.add_argument("--sutrack-search-size", type=int, default=None,
+                    help="override B224 graph search size (multiple of 16; adapts positional embedding)")
+    ap.add_argument("--sutrack-template-size", type=int, default=None,
+                    help="override B224 graph template size (multiple of 16; adapts positional embedding)")
     ap.add_argument("--sutrack-amp", action="store_true", default=True,
                     help="use CUDA FP16 autocast for SUTrack inference (default: on)")
     ap.add_argument("--no-sutrack-amp", dest="sutrack_amp", action="store_false",

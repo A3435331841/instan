@@ -1,0 +1,66 @@
+# B224 基础上的 OD-like 改良消融（2026-08-27）
+
+本轮目标不是把多个模型离线投票，而是在 SUTrack-B224 的逐帧链路上逐个验证可解释的改良。所有结果使用同一 `eval_official.run_sequence`、同一 ERP 三平铺、同一 OpenVINO GPU 图和同一 OPE 评分。除注明外，速度是本地 Intel Arc GPU 的端到端（解码 + 预处理 + 推理）FPS；序列只截取了 450 帧时，指标用于机制筛选，不代表 130 条全量成绩。
+
+## 已跑通的底层链路
+
+- B224 encoder/decoder 已导出为固定 `search=224, template=112` 的 ONNX，并通过 ONNX checker。
+- ONNX 已转换为 OpenVINO IR；OpenVINO GPU 图的单次推理 P50 约 15.5 ms，明显快于 DirectML。
+- `sutrack_b224_s224_t128.xml` 是同一 B224 权重、仅把 template 输入改为 128 并插值绝对位置编码的对照图。
+- 当前改良代码在 `scripts/run_sutrack_b224_openvino_sequence.py`，默认行为仍是原始 B224；所有改良均通过显式参数开启。
+
+## 机制一：模板分辨率（OD 的大模板思路）
+
+| 序列 | B224 112 | 固定模板 128 | 变化 | 固定模板 128 结论 |
+|---|---:|---:|---:|---|
+| `train_sim/seq_0071`（低质量/运动） | AUC 0.2281 / SR 0.0656 / e2e 34.58 | **0.7327 / 0.9188 / 39.72** | AUC +0.5046 | 强救援 |
+| `train_sim/seq_0012`（正常对照） | 0.6767 / 0.9399 / 40.63 | 0.6155 / 0.8307 / 40.05 | AUC -0.0612 | 明显回退 |
+| `train_sim/seq_0046`（快速/尺度变化，前 1312 帧） | — | 0.0988 / 0.0732 / 39.08 | — | 不能全局启用 |
+
+结论：模板 128 是有独占能力的专家，不适合静态替换 B224。
+
+## 机制二：质量门控模板专家
+
+实现 `MotionAdaptiveTracker`：先运行 B224/112；只有前 30 帧内连续 3 帧 Hann 加权峰值的中位数 `<=0.40` 才切换到 B224/128。切换只使用推理时响应质量，不读取序列名、GT 或离线结果；运动量只保留作诊断，避免快速运动造成误触发。
+
+| 序列 | 原始 B224 | 质量门控 | 触发帧 | AUC变化 | e2e FPS | 判定 |
+|---|---:|---:|---:|---:|---:|---|
+| `seq_0071`（900 帧） | 0.2281 / 0.0656 | **0.6948 / 0.8565** | 17 | **+0.4667** | 35.08 | 通过：困难场景救援 |
+| `seq_0012`（450 帧） | 0.6767 / 0.9399 | 0.6767 / 0.9399 | — | 0.0000 | 40.63 | 通过：正常场景不回退 |
+| `seq_0046`（450 帧） | 0.4976 / 0.6102 | 0.4976 / 0.6102 | — | 0.0000 | 40.69 | 通过：快速场景不误触发 |
+| `seq_0044`（450 帧） | 0.2670 / 0.2940 | **0.3865 / 0.4053** | 21 | **+0.1194** | 39.84 | 通过：困难场景改善 |
+| `seq_0072`（450 帧） | 0.5512 / 0.6637 | 0.5512 / 0.6637 | — | 0.0000 | 40.63 | 通过：不改变强项 |
+| `seq_0024`（450 帧） | 0.1536 / 0.1292 | 0.1536 / 0.1292 | — | 0.0000 | 40.82 | 未解决：需要接缝/小目标专项 |
+
+这一步是当前最可靠的改良：在两个困难序列获得增益，同时四个对照没有被固定模板专家拖低，且端到端速度仍超过 30 FPS。
+
+## 机制三：低置信度二次搜索（候选消除式 search-factor）
+
+新增可选 `--fallback-search-factor`，在主搜索峰值低时再跑一个不同 search factor，并以同一 Hann 响应作候选选择。它用于验证 OD-like 的候选消除思路，默认关闭。
+
+- 强制在低质量帧使用 factor 3.0：`seq_0071` 前 450 帧 AUC 0.5179，但 271/449 帧触发，e2e 只有 24.66 FPS。
+- 加大冷却到 10 帧仍只有 AUC 0.2234，说明“逐帧按峰值选更大/更小搜索窗”会污染状态，不能直接进入主线。
+- 因此当前主线保留质量门控模板；二次 search 仅留作后续加入运动/anchor 一致性后再验证，不作为提交方案。
+
+## 当前实现与可复现实验
+
+```powershell
+$env:PYTHONPATH='D:\instan\grt360_scratch\intel_runtime_probe_20260827\Lib\site-packages'
+python scripts/run_sutrack_b224_openvino_sequence.py `
+  --xml D:\instan\grt360_scratch\openvino\sutrack_b224.xml `
+  --high-xml D:\instan\grt360_scratch\openvino\sutrack_b224_s224_t128.xml `
+  --motion-adaptive --quality-threshold 0.40 --quality-run 3 `
+  --switch-deadline 30 --device GPU `
+  --data D:\instan\grt360_storage\datasets\official_train\train `
+  --seq train_sim/seq_0071 --max-frames 900 `
+  --out D:\instan\grt360_scratch\openvino_gpu_sim0071_b224_motion_q40_d30_latest_20260827
+```
+
+输出目录同时保存 `results_erp.txt`、`quality.txt` 和 `summary.json`。质量门控仍是研究候选，尚未声称全量 130 条达标；下一步应在 6～10 条同类序列簇上验证，再决定是否接入正式 runner。
+
+## 下一步顺序
+
+1. 先把质量门控扩到极区/接缝/小目标各自的代表性序列簇，保持“困难均值提升、正常对照不回退”的门槛。
+2. 对 `seq_0024` 这类未触发样本开发圆周接缝裁剪和 anchor 一致性，而不是盲目扩大模板。
+3. 只有簇级通过后，才把模板门控接入正式 `AdaptiveSphericalTracker`，并用 train95 OOF 标定阈值。
+4. 全量 130 与 valid35 仍保持锁定；Docker 只做离线干跑，不执行比赛仓库 push。
