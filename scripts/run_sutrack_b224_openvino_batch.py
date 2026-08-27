@@ -63,7 +63,7 @@ def make_parser():
     ap.add_argument("--switch-deadline", type=int, default=30)
     ap.add_argument("--search-factor", type=float, default=4.0)
     ap.add_argument("--search-factor-mode",
-                    choices=["fixed", "moderate_fov", "large_fov"], default="fixed")
+                    choices=["fixed", "moderate_fov", "large_fov", "adaptive"], default="fixed")
     ap.add_argument("--large-fov-fallback-search-factor", type=float, default=5.0)
     ap.add_argument("--template-factor", type=float, default=2.0)
     ap.add_argument("--search-size", type=int, default=224)

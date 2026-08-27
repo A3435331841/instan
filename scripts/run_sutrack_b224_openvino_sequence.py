@@ -291,6 +291,7 @@ class OpenVinoB224Tracker:
         self.projection_used_last = "erp"
         self._ebfov_cache = RemapCache(capacity=256)
         self.bfov_state = None
+        self.initial_bfov = None
         self.initial_target_width = None
         self.polar_sample_count = 0
         self.fallback_calls = 0
@@ -385,6 +386,11 @@ class OpenVinoB224Tracker:
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **_kwargs):
         self.height, self.width = frame_rgb.shape[:2]
+        if init_bfov is not None:
+            self.initial_bfov = BFoV(*[float(v) for v in init_bfov[:4]])
+        else:
+            self.initial_bfov = bfov_from_erp_bbox(
+                *[float(v) for v in erp_box], int(self.width), int(self.height))
         self.initial_latitude = self._latitude(erp_box)
         self.initial_target_width = float(erp_box[2])
         self.active_fallback_search_factor = self.fallback_search_factor
@@ -394,7 +400,6 @@ class OpenVinoB224Tracker:
             # B224 strengths.  This rule uses only the initial BFoV, never a
             # sequence name or ground truth.
             if init_bfov is None:
-                from scripts.eval_official import bfov_from_erp_bbox
                 initial = bfov_from_erp_bbox(*erp_box, self.width, self.height)
                 fov_h, fov_v = initial.fov_h, initial.fov_v
             else:
@@ -410,7 +415,6 @@ class OpenVinoB224Tracker:
             # 180° views are kept on factor 4 because they benefit from the
             # quality-gated template branch instead.
             if init_bfov is None:
-                from scripts.eval_official import bfov_from_erp_bbox
                 initial = bfov_from_erp_bbox(*erp_box, self.width, self.height)
                 fov_h, fov_v = initial.fov_h, initial.fov_v
             else:
@@ -419,6 +423,36 @@ class OpenVinoB224Tracker:
                 self.active_search_factor = 2.0
                 if self.fallback_search_factor is not None:
                     self.active_fallback_search_factor = self.large_fov_fallback_search_factor
+            else:
+                self.active_search_factor = 4.0
+        elif self.search_factor_mode == "adaptive":
+            # Causal geometry-only SR policy.  The fixed 224-token search
+            # grid has opposite failure modes: a small BFoV becomes too tiny
+            # at factor 4, while a wide/high-latitude BFoV can lose the target
+            # if the crop is tightened.  Pick the crop from the init BFoV and
+            # latitude only; no sequence name, GT or offline score is used.
+            # The 7-degree guard protects the high-latitude 8--12-degree
+            # regime where factor 3 caused early drift in the sweep, while
+            # very tiny targets still get the dense crop.
+            if init_bfov is None:
+                initial = bfov_from_erp_bbox(*erp_box, self.width, self.height)
+                fov_h, fov_v, lat = initial.fov_h, initial.fov_v, initial.lat
+            else:
+                fov_h, fov_v, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                                    float(init_bfov[1]))
+            if 90.0 <= fov_h < 150.0 and fov_v >= 100.0:
+                self.active_search_factor = 2.0
+                if self.fallback_search_factor is not None:
+                    self.active_fallback_search_factor = self.large_fov_fallback_search_factor
+            elif ((fov_h < 15.0 and fov_v < 35.0) and
+                  not (abs(lat) >= 65.0 and fov_h >= 7.0 and fov_v >= 7.0)):
+                self.active_search_factor = 3.0
+            elif 15.0 <= fov_h < 25.0 and fov_v <= 55.0:
+                # Compact/polar targets are still under-resolved at factor 4;
+                # use the denser crop before the moderate-FoV branch.
+                self.active_search_factor = 3.0
+            elif 25.0 <= fov_h <= 60.0 and fov_v <= 70.0:
+                self.active_search_factor = 3.5
             else:
                 self.active_search_factor = 4.0
         elif self.search_factor_mode != "fixed":
@@ -769,6 +803,13 @@ class MotionAdaptiveTracker:
         self.switched = False
         self.high = None
         self.switch_frame = None
+        # On very small high-latitude targets the larger-template hand-off is
+        # counterproductive: it magnifies the polar warp and can lock onto a
+        # background peak before the geometry-aware crop has stabilized.  Keep
+        # the B224 branch (with the adaptive factor) in that causal regime;
+        # other low-quality scenes still receive the usual high-template
+        # rescue.
+        self.suppress_tiny_polar_high = False
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
         self.base.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
@@ -778,6 +819,13 @@ class MotionAdaptiveTracker:
         self.switched = False
         self.high = None
         self.switch_frame = None
+        self.suppress_tiny_polar_high = bool(
+            self.search_factor_mode == "adaptive" and
+            self.base.initial_bfov is not None and
+            abs(float(self.base.initial_bfov.lat)) >= 65.0 and
+            float(self.base.initial_bfov.fov_h) < 15.0 and
+            float(self.base.initial_bfov.fov_v) < 35.0
+        )
 
     def track(self, frame_rgb, **kwargs):
         out = self.active.track(frame_rgb, **kwargs)
@@ -791,13 +839,26 @@ class MotionAdaptiveTracker:
         # to bounce back near its previous center.  Require the calibrated
         # quality signal for the actual switch; motion is retained only as a
         # diagnostic trace.
-        if self.base.frame_id <= self.switch_deadline and low_quality:
+        if (self.base.frame_id <= self.switch_deadline and low_quality and
+                not self.suppress_tiny_polar_high):
             current = [self.base.state[0] % self.base.width, self.base.state[1],
                        self.base.state[2], self.base.state[3]]
+            # Keep the causal geometry decision across the 112->128 template
+            # hand-off.  Re-evaluating an adaptive mode from the transient
+            # ERP box would silently change factor (and made identical
+            # factor-3 runs diverge when the high branch was activated).
+            high_factor = (self.base.active_search_factor
+                           if self.search_factor_mode == "adaptive"
+                           else self.search_factor)
+            high_mode = ("fixed" if self.search_factor_mode == "adaptive"
+                         else self.search_factor_mode)
+            high_fallback = (self.base.active_fallback_search_factor
+                             if self.search_factor_mode == "adaptive"
+                             else self.fallback_search_factor)
             self.high = OpenVinoB224Tracker(self.high_model, search_size=224, template_size=128,
-                                            search_factor=self.search_factor,
-                                            search_factor_mode=self.search_factor_mode,
-                                            fallback_search_factor=self.fallback_search_factor,
+                                            search_factor=high_factor,
+                                            search_factor_mode=high_mode,
+                                            fallback_search_factor=high_fallback,
                                             fallback_quality_threshold=self.fallback_quality_threshold,
                                             fallback_min_gain=self.fallback_min_gain,
                                             fallback_cooldown=self.fallback_cooldown,
@@ -857,7 +918,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--switch-deadline", type=int, default=30)
     parser.add_argument("--out", required=True)
     parser.add_argument("--search-factor", type=float, default=4.0)
-    parser.add_argument("--search-factor-mode", choices=["fixed", "moderate_fov", "large_fov"], default="fixed")
+    parser.add_argument("--search-factor-mode", choices=["fixed", "moderate_fov", "large_fov", "adaptive"], default="fixed")
     parser.add_argument("--large-fov-fallback-search-factor", type=float, default=5.0)
     parser.add_argument("--template-factor", type=float, default=2.0)
     parser.add_argument("--search-size", type=int, default=224)
