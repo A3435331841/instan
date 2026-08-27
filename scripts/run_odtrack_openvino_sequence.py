@@ -36,8 +36,14 @@ def preprocess_rgb(patch: np.ndarray) -> np.ndarray:
 class OpenVinoODTrackTracker:
     def __init__(self, compiled_model, search_size=384, template_size=192,
                  search_factor=5.0, template_factor=2.0, update_interval=25,
-                 update_threshold=0.55, seam_recenter=True):
+                 update_threshold=0.55, seam_recenter=True,
+                 first_compiled_model=None):
+        # The upstream model has a special first call (one template, no
+        # track-query) and steady-state calls (one template + query).  Keep a
+        # separate first graph when supplied; the legacy three-template graph
+        # remains usable for quick smoke tests.
         self.compiled = compiled_model
+        self.first_compiled = first_compiled_model
         self.search_size = int(search_size)
         self.template_size = int(template_size)
         self.search_factor = float(search_factor)
@@ -51,18 +57,38 @@ class OpenVinoODTrackTracker:
         self.track_query = np.zeros((1, 1, 768), dtype=np.float32)
         self.frame_id = 0
         self.last_quality = 1.0
-        self.inputs = list(compiled_model.inputs)
-        self.outputs = list(compiled_model.outputs)
-        self.template_names = [x.any_name for x in self.inputs if list(x.shape) == [1, 3, self.template_size, self.template_size]]
-        self.search_name = next(x.any_name for x in self.inputs if list(x.shape) == [1, 3, self.search_size, self.search_size])
-        self.query_name = next(x.any_name for x in self.inputs if list(x.shape) == [1, 1, 768])
-        self.score_name = next(x.any_name for x in self.outputs if list(x.shape) == [1, 1, self.search_size // 16, self.search_size // 16])
-        self.size_name = next(x.any_name for x in self.outputs if list(x.shape) == [1, 2, self.search_size // 16, self.search_size // 16])
-        self.offset_name = next(x.any_name for x in self.outputs if list(x.shape) == [1, 2, self.search_size // 16, self.search_size // 16])
-        self.next_query_name = next(x.any_name for x in self.outputs if list(x.shape) == [1, 1, 768])
+        self._bind_graph(compiled_model)
+        self.first_io = self._graph_io(first_compiled_model) if first_compiled_model is not None else None
         side = self.search_size // 16
         axis = 0.5 * (1.0 - np.cos((2.0 * np.pi / (side + 1.0)) * np.arange(1, side + 1, dtype=np.float32)))
         self.window = axis[:, None] * axis[None, :]
+
+    def _graph_io(self, model):
+        if model is None:
+            return None
+        inputs = list(model.inputs)
+        outputs = list(model.outputs)
+        templates = [x.any_name for x in inputs if list(x.shape) == [1, 3, self.template_size, self.template_size]]
+        return {
+            "templates": templates,
+            "template": templates[0],
+            "search": next(x.any_name for x in inputs if list(x.shape) == [1, 3, self.search_size, self.search_size]),
+            "query": next((x.any_name for x in inputs if list(x.shape) == [1, 1, 768]), None),
+            "score": next(x.any_name for x in outputs if list(x.shape) == [1, 1, self.search_size // 16, self.search_size // 16]),
+            "size": next(x.any_name for x in outputs if list(x.shape) == [1, 2, self.search_size // 16, self.search_size // 16]),
+            "offset": next(x.any_name for x in outputs if list(x.shape) == [1, 2, self.search_size // 16, self.search_size // 16]),
+            "next_query": next(x.any_name for x in outputs if list(x.shape) == [1, 1, 768]),
+        }
+
+    def _bind_graph(self, model):
+        io = self._graph_io(model)
+        self.template_names = list(io["templates"])
+        self.search_name = io["search"]
+        self.query_name = io["query"]
+        self.score_name = io["score"]
+        self.size_name = io["size"]
+        self.offset_name = io["offset"]
+        self.next_query_name = io["next_query"]
 
     def init(self, frame_rgb, erp_box, **_kwargs):
         self.height, self.width = frame_rgb.shape[:2]
@@ -73,17 +99,21 @@ class OpenVinoODTrackTracker:
         tiled = np.concatenate([frame_rgb, frame_rgb, frame_rgb], axis=1)
         patch, _rf = sample_target(tiled, self.state, self.template_factor, self.template_size)
         t = preprocess_rgb(patch)
-        self.templates = [t.copy(), t.copy(), t.copy()]
+        self.templates = [t.copy(), t.copy(), t.copy()] if self.first_compiled is None else [t.copy()]
         self.track_query = np.zeros((1, 1, 768), dtype=np.float32)
         self.frame_id = 0
         self.last_quality = 1.0
 
     def _map_box(self, normalized, resize_factor):
         _, _, fh, fw = (1, 1, self.search_size // 16, self.search_size // 16)
-        cx = float(normalized[0]) * self.search_size
-        cy = float(normalized[1]) * self.search_size
-        w = max(1.0, float(normalized[2]) * self.search_size)
-        h = max(1.0, float(normalized[3]) * self.search_size)
+        # The graph predicts coordinates in the resized search crop.  Undo
+        # that resize before mapping the center/size back to the tiled ERP;
+        # omitting this division collapses wide/polar boxes at the top edge.
+        crop_scale = float(resize_factor)
+        cx = float(normalized[0]) * self.search_size / crop_scale
+        cy = float(normalized[1]) * self.search_size / crop_scale
+        w = max(1.0, float(normalized[2]) * self.search_size / crop_scale)
+        h = max(1.0, float(normalized[3]) * self.search_size / crop_scale)
         prev_cx = self.state[0] + 0.5 * self.state[2]
         prev_cy = self.state[1] + 0.5 * self.state[3]
         half = 0.5 * self.search_size / float(resize_factor)
@@ -98,17 +128,23 @@ class OpenVinoODTrackTracker:
     def track(self, frame_rgb, **_kwargs):
         tiled = np.concatenate([frame_rgb, frame_rgb, frame_rgb], axis=1)
         patch, resize_factor = sample_target(tiled, self.state, self.search_factor, self.search_size)
-        inputs = {
-            self.template_names[0]: self.templates[0],
-            self.template_names[1]: self.templates[1],
-            self.template_names[2]: self.templates[2],
-            self.search_name: preprocess_rgb(patch),
-            self.query_name: self.track_query,
+        use_first = self.first_compiled is not None and self.frame_id == 0
+        compiled = self.first_compiled if use_first else self.compiled
+        io = self.first_io if use_first else {
+            "templates": self.template_names, "template": self.template_names[0], "search": self.search_name,
+            "query": self.query_name, "score": self.score_name,
+            "size": self.size_name, "offset": self.offset_name,
+            "next_query": self.next_query_name,
         }
-        result = self.compiled(inputs)
-        score = np.asarray(result[self.score_name])
-        size = np.asarray(result[self.size_name])
-        offset = np.asarray(result[self.offset_name])
+        inputs = {name: self.templates[min(i, len(self.templates) - 1)]
+                  for i, name in enumerate(io["templates"])}
+        inputs[io["search"]] = preprocess_rgb(patch)
+        if io["query"] is not None:
+            inputs[io["query"]] = self.track_query
+        result = compiled(inputs)
+        score = np.asarray(result[io["score"]])
+        size = np.asarray(result[io["size"]])
+        offset = np.asarray(result[io["offset"]])
         response = score[0, 0] * self.window
         flat = int(np.argmax(response))
         iy, ix = divmod(flat, response.shape[1])
@@ -117,13 +153,17 @@ class OpenVinoODTrackTracker:
                                  (iy + float(offset[0, 1, iy, ix])) / response.shape[0],
                                  float(size[0, 0, iy, ix]), float(size[0, 1, iy, ix])], dtype=np.float32)
         self.state = self._map_box(normalized, resize_factor)
-        self.track_query = np.asarray(result[self.next_query_name], dtype=np.float32)
+        self.track_query = np.asarray(result[io["next_query"]], dtype=np.float32)
         self.last_quality = conf
         self.frame_id += 1
         if (self.update_interval > 0 and self.frame_id % self.update_interval == 0 and
                 conf >= self.update_threshold):
             z_patch, _ = sample_target(tiled, self.state, self.template_factor, self.template_size)
-            self.templates = [self.templates[1], self.templates[2], preprocess_rgb(z_patch)]
+            new_template = preprocess_rgb(z_patch)
+            if self.first_compiled is None:
+                self.templates = [self.templates[1], self.templates[2], new_template]
+            else:
+                self.templates = [new_template]
         return {"target_bbox": [self.state[0] % self.width, self.state[1], self.state[2], self.state[3]],
                 "quality": conf, "expert_used": "odtrack_openvino"}
 
@@ -131,6 +171,8 @@ class OpenVinoODTrackTracker:
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--xml", required=True)
+    ap.add_argument("--first-xml", default=None,
+                    help="optional first-step graph exported with one template and no track-query")
     ap.add_argument("--data", required=True)
     ap.add_argument("--seq", default="train_sim/seq_0002")
     ap.add_argument("--out", required=True)
@@ -145,6 +187,8 @@ def main(argv=None) -> int:
     t0 = time.perf_counter()
     core = ov.Core()
     compiled = core.compile_model(str(Path(args.xml).resolve()), args.device)
+    first_compiled = (core.compile_model(str(Path(args.first_xml).resolve()), args.device)
+                      if args.first_xml else None)
     compile_seconds = time.perf_counter() - t0
     holder = {}
 
@@ -152,7 +196,8 @@ def main(argv=None) -> int:
         tracker = OpenVinoODTrackTracker(compiled, search_factor=args.search_factor,
                                          template_factor=args.template_factor,
                                          update_interval=args.update_interval,
-                                         seam_recenter=True)
+                                         seam_recenter=True,
+                                         first_compiled_model=first_compiled)
         holder["tracker"] = tracker
         return tracker
 
