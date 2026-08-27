@@ -16,6 +16,13 @@ import numpy as np
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT))
 from scripts.eval_official import run_sequence  # noqa: E402
+from panotrack.geometry.bfov import BFoV, bfov_from_erp_bbox  # noqa: E402
+from panotrack.geometry.projection import (  # noqa: E402
+    local_bbox_to_erp,
+    remap_image,
+    tangent_remap,
+)
+from panotrack.pipeline.pipeline import _erp_bbox_to_local  # noqa: E402
 
 
 MEAN = np.asarray([0.485, 0.456, 0.406], dtype=np.float32)
@@ -77,6 +84,42 @@ def preprocess(patch: np.ndarray) -> np.ndarray:
     return np.concatenate([arr, arr], axis=1).astype(np.float32, copy=False)
 
 
+def sample_target_ebfov(image: np.ndarray, box, factor: float, output_size: int,
+                        erp_w: int, erp_h: int):
+    """Sample an ERP frame in spherical/eBFoV coordinates.
+
+    The returned patch is a perspective-compatible square, but its source
+    pixels are sampled at equal angular offsets on the sphere.  For windows
+    whose horizontal or vertical FoV is <=90 degrees, ``tangent_remap``
+    intentionally falls back to gnomonic sampling; larger windows use the
+    eBFoV surface definition from the 360VOTS framework.  ``meta`` is kept
+    with the map so the B224 local prediction can be inverse-projected without
+    an ERP Jacobian approximation.
+    """
+    target = bfov_from_erp_bbox(*[float(v) for v in box], int(erp_w), int(erp_h))
+    max_fov = 179.0
+    cut = BFoV(
+        lon=float(target.lon),
+        lat=float(np.clip(target.lat, -89.0, 89.0)),
+        fov_h=float(np.clip(target.fov_h * max(1.0, float(factor)), 4.0, max_fov)),
+        fov_v=float(np.clip(target.fov_v * max(1.0, float(factor)), 4.0, max_fov)),
+        rotation=float(getattr(target, "rotation", 0.0)),
+    )
+    map_x, map_y = tangent_remap(cut, int(output_size), int(output_size),
+                                 int(erp_w), int(erp_h))
+    patch = remap_image(np.asarray(image), map_x, map_y)
+    meta = {
+        "mode": "ebfov" if max(cut.fov_h, cut.fov_v) > 90.0 else "gnomonic",
+        "bfov": cut,
+        "map_x": map_x,
+        "map_y": map_y,
+        "erp_w": int(erp_w),
+        "erp_h": int(erp_h),
+        "output_size": int(output_size),
+    }
+    return patch, meta
+
+
 def clip_box(box, height: int, width: int, margin: int = 10):
     x1, y1, w, h = [float(v) for v in box]
     x2, y2 = x1 + w, y1 + h
@@ -131,7 +174,8 @@ class OpenVinoB224Tracker:
                  polar_aspect_max=2.5, polar_small_width=100.0,
                  polar_max_frame=None, polar_require_initial=True,
                  small_template_factor=None, small_template_width=100.0,
-                 small_template_require_initial=True):
+                 small_template_require_initial=True,
+                 projection_mode="erp"):
         self.compiled = compiled_model
         self.width = self.height = None
         self.state = None
@@ -198,6 +242,10 @@ class OpenVinoB224Tracker:
                                       else float(small_template_factor))
         self.small_template_width = float(small_template_width)
         self.small_template_require_initial = bool(small_template_require_initial)
+        self.projection_mode = str(projection_mode).lower()
+        if self.projection_mode not in ("erp", "auto", "ebfov"):
+            raise ValueError(f"unknown projection_mode: {projection_mode}")
+        self.projection_used_last = "erp"
         self.initial_target_width = None
         self.polar_sample_count = 0
         self.fallback_calls = 0
@@ -219,6 +267,22 @@ class OpenVinoB224Tracker:
         cy = float(box[1]) + 0.5 * float(box[3])
         return 90.0 - cy / float(self.height) * 180.0
 
+    def _source_frame(self, image):
+        """Return one ERP tile for spherical remap (never a 3W canvas)."""
+        image = np.asarray(image)
+        if (self.projection_mode != "erp" and self.width is not None and
+                image.shape[1] >= 3 * int(self.width)):
+            return np.ascontiguousarray(image[:, int(self.width):2 * int(self.width)])
+        return image
+
+    def _should_project(self, box, factor):
+        if self.projection_mode == "erp":
+            return False
+        if self.projection_mode == "ebfov":
+            return True
+        target = bfov_from_erp_bbox(*[float(v) for v in box], int(self.width), int(self.height))
+        return max(target.fov_h, target.fov_v) * max(1.0, float(factor)) > 90.0
+
     def _sample(self, image, box, factor, output_size, template=False):
         small_width_ok = (float(box[2]) <= self.small_template_width)
         if self.small_template_require_initial:
@@ -226,6 +290,12 @@ class OpenVinoB224Tracker:
                               self.initial_target_width <= self.small_template_width)
         if (template and self.small_template_factor is not None and small_width_ok):
             factor = self.small_template_factor
+        if self._should_project(box, factor):
+            patch, meta = sample_target_ebfov(
+                self._source_frame(image), box, factor, output_size,
+                int(self.width), int(self.height))
+            self.projection_used_last = str(meta["mode"])
+            return patch, meta
         latitude = self._latitude(box)
         aspect = float(box[2]) / max(1.0, float(box[3]))
         polar_shape_ok = (self.polar_aspect_max is None or
@@ -240,10 +310,18 @@ class OpenVinoB224Tracker:
             self.polar_sample_count += 1
             return sample_target_polar(image, box, factor, output_size, latitude)
         patch, rf = sample_target(image, box, factor, output_size)
+        self.projection_used_last = "erp"
         return patch, (rf, rf)
 
     def _anno(self, box, resize_factor, size=None):
         size = self.template_size if size is None else int(size)
+        if isinstance(resize_factor, dict):
+            local = _erp_bbox_to_local(
+                box, resize_factor["bfov"], size, size,
+                int(self.width), int(self.height))
+            lx, ly, lw, lh = [float(v) for v in local]
+            cx = (size - 1.0) * 0.5
+            return np.asarray([lx, ly, lw, lh], dtype=np.float32) / float(size - 1)
         cx = (size - 1.0) * 0.5
         if np.isscalar(resize_factor):
             resize_factor = (float(resize_factor), float(resize_factor))
@@ -293,9 +371,11 @@ class OpenVinoB224Tracker:
         elif self.search_factor_mode != "fixed":
             raise ValueError(f"unknown search_factor_mode: {self.search_factor_mode}")
         tiled = np.concatenate([frame_rgb, frame_rgb, frame_rgb], axis=1)
-        self.state = [float(erp_box[0] % self.width + self.width), float(erp_box[1]),
-                      float(erp_box[2]), float(erp_box[3])]
-        patch, rf = self._sample(tiled, self.state, self.template_factor,
+        state_x = (float(erp_box[0]) % self.width + self.width
+                   if self.projection_mode == "erp" else float(erp_box[0]) % self.width)
+        self.state = [state_x, float(erp_box[1]), float(erp_box[2]), float(erp_box[3])]
+        patch, rf = self._sample(tiled if self.projection_mode == "erp" else frame_rgb,
+                                 self.state, self.template_factor,
                                  self.template_size, template=True)
         template = preprocess(patch)
         self.anchor_template = template[0, :3].copy()
@@ -320,7 +400,9 @@ class OpenVinoB224Tracker:
         """
         if center_state is None:
             center_state = self.state
-        patch, rf = self._sample(tiled, center_state, factor, self.search_size)
+        patch, rf = self._sample(
+            tiled if self.projection_mode == "erp" else self._source_frame(tiled),
+            center_state, factor, self.search_size)
         inputs = {self.template_names[0]: self.templates[0], self.template_names[1]: self.templates[1],
                   self.anno_names[0]: self.annos[0][None, :], self.anno_names[1]: self.annos[1][None, :],
                   self.search_name: preprocess(patch)}
@@ -337,19 +419,36 @@ class OpenVinoB224Tracker:
         wh = size[0, :, iy, ix]
         off = offset[0, :, iy, ix]
         normalized = np.asarray([(ix + off[0]) / fw, (iy + off[1]) / fh, wh[0], wh[1]], dtype=np.float32)
-        scale_x = float(self.search_size) / float(rf[0])
-        scale_y = float(self.search_size) / float(rf[1])
-        pred = np.asarray([normalized[0] * scale_x, normalized[1] * scale_y,
-                           normalized[2] * scale_x, normalized[3] * scale_y],
-                          dtype=np.float32)
-        prev_cx = center_state[0] + 0.5 * center_state[2]
-        prev_cy = center_state[1] + 0.5 * center_state[3]
-        half_x = 0.5 * float(self.search_size) / float(rf[0])
-        half_y = 0.5 * float(self.search_size) / float(rf[1])
-        state = [float(pred[0] + prev_cx - half_x - 0.5 * pred[2]),
-                 float(pred[1] + prev_cy - half_y - 0.5 * pred[3]),
-                 float(pred[2]), float(pred[3])]
-        state = clip_box(state, self.height, 3 * self.width, margin=10)
+        if isinstance(rf, dict):
+            # In a projected patch, normalized coordinates already live in
+            # the output grid.  Inverse-project the predicted local rectangle
+            # through the exact eBFoV map instead of applying an ERP scale.
+            local_w = float(normalized[2]) * float(self.search_size)
+            local_h = float(normalized[3]) * float(self.search_size)
+            local_box = [
+                float(normalized[0]) * float(self.search_size) - 0.5 * local_w,
+                float(normalized[1]) * float(self.search_size) - 0.5 * local_h,
+                local_w,
+                local_h,
+            ]
+            state = local_bbox_to_erp(
+                *local_box, rf["map_x"], rf["map_y"],
+                int(self.width), int(self.height))
+            state = clip_box(state, self.height, self.width, margin=10)
+        else:
+            scale_x = float(self.search_size) / float(rf[0])
+            scale_y = float(self.search_size) / float(rf[1])
+            pred = np.asarray([normalized[0] * scale_x, normalized[1] * scale_y,
+                               normalized[2] * scale_x, normalized[3] * scale_y],
+                              dtype=np.float32)
+            prev_cx = center_state[0] + 0.5 * center_state[2]
+            prev_cy = center_state[1] + 0.5 * center_state[3]
+            half_x = 0.5 * float(self.search_size) / float(rf[0])
+            half_y = 0.5 * float(self.search_size) / float(rf[1])
+            state = [float(pred[0] + prev_cx - half_x - 0.5 * pred[2]),
+                     float(pred[1] + prev_cy - half_y - 0.5 * pred[3]),
+                     float(pred[2]), float(pred[3])]
+            state = clip_box(state, self.height, 3 * self.width, margin=10)
         if self.scale_clamp_factor is not None:
             state = clamp_state_scale(state, self.state, self.scale_clamp_factor)
         if self.seam_recenter:
@@ -484,7 +583,9 @@ class OpenVinoB224Tracker:
                 "quality": conf,
                 "fallback_used": self.last_fallback_used,
                 "fallback_factor": chosen["factor"],
-                "anchor_similarity": self.last_anchor_similarity}
+                "anchor_similarity": self.last_anchor_similarity,
+                "projection": self.projection_used_last,
+                "projection_mode": self.projection_mode}
 
 
 class MotionAdaptiveTracker:
@@ -511,7 +612,8 @@ class MotionAdaptiveTracker:
                  polar_latitude_threshold=55.0, polar_aspect_max=2.5,
                  polar_small_width=100.0, polar_max_frame=None,
                  polar_require_initial=True, small_template_factor=None,
-                 small_template_width=100.0, small_template_require_initial=True):
+                 small_template_width=100.0, small_template_require_initial=True,
+                 projection_mode="erp"):
         self.base = OpenVinoB224Tracker(base_model, search_size=224, template_size=112,
                                         search_factor=search_factor,
                                         search_factor_mode=search_factor_mode,
@@ -544,7 +646,8 @@ class MotionAdaptiveTracker:
                                         polar_require_initial=polar_require_initial,
                                         small_template_factor=small_template_factor,
                                         small_template_width=small_template_width,
-                                        small_template_require_initial=small_template_require_initial)
+                                        small_template_require_initial=small_template_require_initial,
+                                        projection_mode=projection_mode)
         self.high_model = high_model
         self.search_factor = float(search_factor)
         self.search_factor_mode = str(search_factor_mode)
@@ -589,6 +692,7 @@ class MotionAdaptiveTracker:
                                       else float(small_template_factor))
         self.small_template_width = float(small_template_width)
         self.small_template_require_initial = bool(small_template_require_initial)
+        self.projection_mode = str(projection_mode).lower()
         self.warmup = int(warmup)
         self.threshold_deg = float(threshold_deg)
         self.quality_threshold = float(quality_threshold)
@@ -657,7 +761,8 @@ class MotionAdaptiveTracker:
                                             polar_require_initial=self.polar_require_initial,
                                             small_template_factor=self.small_template_factor,
                                             small_template_width=self.small_template_width,
-                                            small_template_require_initial=self.small_template_require_initial)
+                                            small_template_require_initial=self.small_template_require_initial,
+                                            projection_mode=self.projection_mode)
             self.high.init(frame_rgb, current, init_bfov=None)
             self.active = self.high
             self.switched = True
@@ -745,6 +850,8 @@ def main(argv: list[str] | None = None) -> int:
                         dest="small_template_require_initial", action="store_false",
                         help="allow tighter templates when a target becomes small later")
     parser.set_defaults(small_template_require_initial=True)
+    parser.add_argument("--projection-mode", choices=["erp", "auto", "ebfov"], default="erp",
+                        help="input geometry: legacy ERP crop, automatic large-FoV eBFoV, or eBFoV/gnomonic")
     parser.add_argument("--max-frames", type=int, default=None)
     args = parser.parse_args(argv)
     import openvino as ov
@@ -807,7 +914,8 @@ def main(argv: list[str] | None = None) -> int:
                 polar_require_initial=args.polar_require_initial,
                 small_template_factor=args.small_template_factor,
                 small_template_width=args.small_template_width,
-                small_template_require_initial=args.small_template_require_initial)
+                small_template_require_initial=args.small_template_require_initial,
+                projection_mode=args.projection_mode)
             return tracker_holder["tracker"]
     else:
         def tracker_factory(**_kwargs):
@@ -845,7 +953,8 @@ def main(argv: list[str] | None = None) -> int:
                 polar_require_initial=args.polar_require_initial,
                 small_template_factor=args.small_template_factor,
                 small_template_width=args.small_template_width,
-                small_template_require_initial=args.small_template_require_initial)
+                small_template_require_initial=args.small_template_require_initial,
+                projection_mode=args.projection_mode)
             return tracker_holder["tracker"]
     metrics, pred_erp, _valid, _width, _height, qualities, _statuses, _traces, _latency = run_sequence(
         args.seq, args.data, tracker_factory, args.max_frames)
@@ -897,6 +1006,7 @@ def main(argv: list[str] | None = None) -> int:
     metrics["small_template_factor"] = args.small_template_factor
     metrics["small_template_width"] = args.small_template_width
     metrics["small_template_require_initial"] = args.small_template_require_initial
+    metrics["projection_mode"] = args.projection_mode
     if not args.motion_adaptive and "tracker" in tracker_holder:
         metrics["active_search_factor"] = tracker_holder["tracker"].active_search_factor
         metrics["active_fallback_search_factor"] = tracker_holder["tracker"].active_fallback_search_factor

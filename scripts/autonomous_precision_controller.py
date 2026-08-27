@@ -490,6 +490,7 @@ def policy_flags(policy: dict) -> list[str]:
         ("--polar-aspect-max", "polar_aspect_max"),
         ("--polar-small-width", "polar_small_width"),
         ("--polar-max-frame", "polar_max_frame"),
+        ("--projection-mode", "projection_mode"),
     ):
         if key in policy:
             _flag(flags, name, policy[key])

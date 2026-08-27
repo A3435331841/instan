@@ -103,6 +103,8 @@ def make_parser():
     ap.add_argument("--no-small-template-require-initial",
                     dest="small_template_require_initial", action="store_false")
     ap.set_defaults(small_template_require_initial=True)
+    ap.add_argument("--projection-mode", choices=["erp", "auto", "ebfov"], default="erp",
+                    help="input geometry: legacy ERP crop, automatic large-FoV eBFoV, or eBFoV/gnomonic")
     return ap
 
 
@@ -183,7 +185,8 @@ def main(argv=None):
                     small_template_factor=args.small_template_factor,
                     small_template_width=args.small_template_width,
                     small_template_require_initial=args.small_template_require_initial,
-                )
+                    projection_mode=args.projection_mode,
+            )
                 holder["tracker"] = tracker
                 return tracker
         else:
@@ -227,6 +230,7 @@ def main(argv=None):
                     small_template_factor=args.small_template_factor,
                     small_template_width=args.small_template_width,
                     small_template_require_initial=args.small_template_require_initial,
+                    projection_mode=args.projection_mode,
                 )
                 holder["tracker"] = tracker
                 return tracker
@@ -264,6 +268,7 @@ def main(argv=None):
                 metrics["updates_frozen_frame"] = tracker.updates_frozen_frame
             metrics["compile_seconds"] = compile_seconds
             metrics["batch_wall_seconds"] = time.perf_counter() - t0
+            metrics["projection_mode"] = args.projection_mode
             (seq_out / "metrics.json").write_text(
                 json.dumps(metrics, ensure_ascii=False, indent=2, allow_nan=True),
                 encoding="utf-8")
@@ -280,7 +285,7 @@ def main(argv=None):
                 "auc_dual", "sr_dual", "e2e_fps", "tracker_fps", "switch_frame",
                 "fallback_calls", "fallback_selected", "active_search_factor",
                 "active_fallback_search_factor",
-                "updates_frozen", "updates_frozen_frame"]
+                "updates_frozen", "updates_frozen_frame", "projection_mode"]
         with (out_root / "summary.csv").open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=keys)
             writer.writeheader()
