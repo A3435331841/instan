@@ -24,6 +24,8 @@ python scripts/autonomous_precision_controller.py `
 
 输出包括 `autonomous_run_manifest.json`、`scenario_summary.csv`、`failure_notes.md`、`next_experiment.json` 和 `promotion.json`。
 
+控制器同时生成 `data_audit.csv/json`、`failure_matrix_130.csv`、`latency_summary.json`、`valid35_summary.json`、`full130_summary.json` 和默认关闭的 `route_policy.json`。`route_policy.json` 只有在 OOF 通过独立晋级门后才允许被替换为部署策略。
+
 ## 启动下一轮
 
 默认 `--apply-scope micro` 只跑当前最差序列和一个正常对照；`cluster` 跑相似标签的最多 8 条；`full` 扫描完整 130 条。已有 GPU 任务结束后，才允许启动：
@@ -39,5 +41,7 @@ python scripts/autonomous_precision_controller.py `
 ```
 
 每轮晋级门：单序列困难样本 AUC 至少 +0.10 且正常对照回退不超过 0.01；场景簇平均 +0.05、胜率至少 60% 且至少 3 条独占救援；最终 full130 同时满足 AUC>0.8、SR>0.8、端到端 FPS>30。
+
+要让控制器在当前 GPU 任务结束后自动继续，可加 `--watch --apply --apply-scope cluster --max-iterations 12 --poll-seconds 60`。它会等待已有任务、记录每轮历史、拒绝并发 GPU，并在 full130 三项门槛通过后写入 `MIGRATION_COMPLETE.json` 后退出。
 
 当前本地 OpenVINO 暴露 `CPU` 和 `GPU`；若后续运行时暴露 `NPU`，控制器会自动记录但不会伪造不可用设备的成绩。
