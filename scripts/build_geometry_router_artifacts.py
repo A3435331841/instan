@@ -214,6 +214,7 @@ def main(argv=None) -> int:
             "direct expert: 35<=fov_h<40 and 70<=fov_v<76 and 50<=abs(lat)<60 -> OD tangent",
             "55<=fov_h<70 and 40<=fov_v<50 and 45<=abs(lat)<65 -> B224 auto-eBFoV",
             "fov_h<=6 and abs(lat)<65 and fov_v<=8 -> B224 without high-template switch",
+            "25<=fov_h<30 and fov_v>=70 -> preserve geometry-routed B224 (no early probe)",
             "5.5<=fov_h<=6 and 14<=fov_v<=22 and abs(lat)<30 -> B224 without high-template switch",
             "10<=fov_h<13 and 10<=fov_v<=12.5 and abs(lat)<45 -> B224 without high-template switch",
         ],
