@@ -59,7 +59,7 @@ def route_noswitch_b224(init_bfov) -> tuple[bool, list[str]]:
     if (5.5 <= fh <= 6.0 and 14.0 <= fv <= 22.0 and
             abs(lat) < 30.0):
         return True, ["b224_noswitch_compact_scale_safe"]
-    if 10.0 <= fh < 13.0 and 10.0 <= fv <= 18.0 and abs(lat) < 45.0:
+    if 10.0 <= fh < 13.0 and 10.0 <= fv <= 12.5 and abs(lat) < 45.0:
         return True, ["b224_noswitch_compact_vertical_safe"]
     return False, []
 

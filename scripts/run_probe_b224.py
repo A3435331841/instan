@@ -211,7 +211,13 @@ def route_probe_b224(init_bfov) -> tuple[bool, list[str]]:
         return False, ["probe_preserve_polar_geometry"]
     if fh >= 70.0 or fv >= 100.0:
         return False, ["probe_preserve_large_geometry"]
+    if fh < 15.0 and fv >= 27.0:
+        return False, ["probe_preserve_tall_compact_geometry"]
+    if 30.0 <= fh <= 60.0 and fv >= 70.0:
+        return False, ["probe_preserve_tall_medium_geometry"]
     if 20.0 <= fh <= 60.0 and fv <= 70.0:
+        if 20.0 <= fh < 30.0 and fv < 25.0:
+            return True, ["probe_nonpolar_compact_geometry"]
         if not (20.0 <= fh < 25.0 and fv >= 50.0):
             return False, ["probe_preserve_moderate_geometry"]
     return True, ["probe_nonpolar_compact_geometry"]

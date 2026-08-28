@@ -9,7 +9,10 @@ from scripts.run_geometry_routed_b224_t224 import (
 
 class GeometryRouterTest(unittest.TestCase):
     def test_compact_nonpolar_uses_fast_expert(self):
-        self.assertEqual(route_t224((0.0, 10.0, 12.0, 12.0))[0], True)
+        self.assertEqual(route_t224((0.0, 10.0, 5.0, 5.0))[0], True)
+
+    def test_medium_narrow_band_uses_b224_exploration(self):
+        self.assertEqual(route_t224((0.0, 10.0, 12.0, 12.0))[0], False)
 
     def test_narrow_vertical_risk_band_keeps_b224(self):
         self.assertEqual(route_t224((0.0, 10.0, 12.0, 25.0))[0], False)
@@ -23,6 +26,9 @@ class GeometryRouterTest(unittest.TestCase):
 
     def test_high_lat_compact_vertical_view_keeps_existing_route(self):
         self.assertEqual(route_noswitch_b224((0.0, -55.0, 11.6, 14.8))[0], False)
+
+    def test_medium_vertical_risk_view_keeps_adaptive_route(self):
+        self.assertEqual(route_noswitch_b224((0.0, -12.6, 11.8, 14.0))[0], False)
 
     def test_extreme_pole_stays_on_fast_expert(self):
         self.assertEqual(route_noswitch_b224((0.0, -80.0, 5.5, 5.2))[0], False)

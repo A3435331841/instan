@@ -29,6 +29,7 @@ from scripts.run_geometry_routed_b224_t224 import (  # noqa: E402
 from scripts.run_sutrack_b224_redetect import (  # noqa: E402
     SphericalB224RedetectTracker,
 )
+from scripts.run_odtrack_openvino_sequence import OpenVinoODTrackTracker  # noqa: E402
 
 
 def route_recovery(init_bfov) -> tuple[bool, list[str]]:
@@ -48,6 +49,17 @@ def route_recovery(init_bfov) -> tuple[bool, list[str]]:
     if 60.0 <= fh < 80.0 and 75.0 <= fv < 100.0 and abs(lat) >= 40.0:
         return True, ["high_lat_broad_sparse_od_recovery"]
     return False, ["geometry_b224_t224_router"]
+
+
+def route_direct_od(init_bfov) -> tuple[bool, list[str]]:
+    """Select a direct tangent OD expert for the validated tiny polar band."""
+    if init_bfov is None:
+        return False, []
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                   float(init_bfov[1]))
+    if 6.0 <= fh < 7.0 and 10.0 <= fv < 15.0 and abs(lat) >= 60.0:
+        return True, ["tiny_polar_direct_od_tangent"]
+    return False, []
 
 
 class GeometryRecoveryTracker:
@@ -70,13 +82,24 @@ class GeometryRecoveryTracker:
             od_lost_cadence=args.od_lost_cadence,
             od_quality_threshold=args.od_quality_threshold)
                        if od_model is not None else None)
+        self.od_direct = (OpenVinoODTrackTracker(
+            od_model, search_size=384, template_size=192,
+            search_factor=5.0, template_factor=2.0,
+            update_interval=25, update_threshold=0.55,
+            seam_recenter=True, first_compiled_model=od_first_model,
+            projection_mode="tangent") if od_model is not None else None)
         self.active = self.geometry
         self.selected_method = "geometry_b224_t224"
         self.route_reasons = []
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
+        use_direct, direct_reasons = route_direct_od(init_bfov)
         use_recovery, reasons = route_recovery(init_bfov)
-        if use_recovery and self.recovery is not None:
+        if use_direct and self.od_direct is not None:
+            self.active = self.od_direct
+            self.selected_method = "odtrack_tangent_direct"
+            self.route_reasons = direct_reasons
+        elif use_recovery and self.recovery is not None:
             self.active = self.recovery
             self.selected_method = "b224_od_recovery"
             self.route_reasons = reasons
@@ -109,7 +132,7 @@ def main(argv=None) -> int:
     ap.add_argument("--run-len", type=int, default=5)
     ap.add_argument("--search-interval", type=int, default=10)
     ap.add_argument("--min-score", type=float, default=0.45)
-    ap.add_argument("--anchor-min-similarity", type=float, default=0.15)
+    ap.add_argument("--anchor-min-similarity", type=float, default=0.38)
     ap.add_argument("--max-motion-deg", type=float, default=180.0)
     ap.add_argument("--erp-downscale", type=int, default=4)
     ap.add_argument("--od-projection", choices=["erp", "tangent"], default="tangent")

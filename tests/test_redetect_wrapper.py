@@ -7,7 +7,7 @@ from scripts.run_sutrack_b224_redetect import (
     circular_delta,
     crop_wrap,
 )
-from scripts.run_geometry_routed_od_recovery import route_recovery
+from scripts.run_geometry_routed_od_recovery import route_direct_od, route_recovery
 from scripts.run_probe_b224 import route_probe_b224
 
 
@@ -36,9 +36,15 @@ class RedetectWrapperTest(unittest.TestCase):
         self.assertFalse(route_recovery((0.0, -35.0, 58.0, 109.0))[0])
         self.assertFalse(route_recovery((0.0, -20.0, 20.0, 30.0))[0])
 
+    def test_direct_od_gate_is_narrow_polar_geometry(self):
+        self.assertTrue(route_direct_od((0.0, -66.0, 6.3, 12.0))[0])
+        self.assertFalse(route_direct_od((0.0, -70.0, 9.2, 9.0))[0])
+
     def test_probe_preserves_polar_and_moderate_geometry(self):
         self.assertFalse(route_probe_b224((0.0, -70.0, 36.0, 44.0))[0])
         self.assertFalse(route_probe_b224((0.0, 0.0, 27.0, 58.0))[0])
+        self.assertFalse(route_probe_b224((0.0, 8.7, 9.2, 28.3))[0])
+        self.assertFalse(route_probe_b224((0.0, -18.8, 45.6, 90.4))[0])
         self.assertTrue(route_probe_b224((0.0, 0.0, 22.0, 56.0))[0])
 
 
