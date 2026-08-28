@@ -212,6 +212,7 @@ def main(argv=None) -> int:
             "direct expert: 6<=fov_h<7 and 10<=fov_v<15 and abs(lat)>=60 -> OD tangent",
             "direct expert: 8.5<=fov_h<10 and 8<=fov_v<10.5 and 65<=abs(lat)<69.9 -> OD tangent",
             "direct expert: 35<=fov_h<40 and 70<=fov_v<76 and 50<=abs(lat)<60 -> OD tangent",
+            "55<=fov_h<70 and 40<=fov_v<50 and 45<=abs(lat)<65 -> B224 auto-eBFoV",
             "fov_h<=6 and abs(lat)<65 and fov_v<=8 -> B224 without high-template switch",
             "5.5<=fov_h<=6 and 14<=fov_v<=22 and abs(lat)<30 -> B224 without high-template switch",
             "10<=fov_h<13 and 10<=fov_v<=12.5 and abs(lat)<45 -> B224 without high-template switch",

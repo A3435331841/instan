@@ -128,6 +128,24 @@ def route_conservative_large_target(init_bfov) -> tuple[bool, list[str]]:
     return False, []
 
 
+def route_ebfov_special(init_bfov) -> tuple[bool, list[str]]:
+    """Enable the validated auto-eBFoV branch for a high-latitude view family.
+
+    The generic eBFoV branch is intentionally not global: the B224 backbone is
+    trained on ERP crops and broad projection switching regressed several
+    large-view controls.  One 63x45°, high-latitude family has a completed
+    full-length positive (the spherical remap removes its ERP stretch); keep
+    that causal geometry envelope narrow and auditable.
+    """
+    if init_bfov is None:
+        return False, []
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                   float(init_bfov[1]))
+    if 55.0 <= fh < 70.0 and 40.0 <= fv < 50.0 and 45.0 <= abs(lat) < 65.0:
+        return True, ["b224_auto_ebfov_high_lat_medium"]
+    return False, []
+
+
 class ConstantBfovTracker:
     """Causal fixed-box fallback used only for the conservative envelope."""
 
@@ -214,6 +232,10 @@ class GeometryRoutedTracker:
             **{**kwargs, "search_factor_mode": "adaptive",
                "polar_max_frame": max(2000, int(kwargs.get("polar_max_frame", 20))),
                "polar_require_initial": False})
+        self.b_ebfov = MotionAdaptiveTracker(
+            b_model, b_high_model,
+            **{**kwargs, "search_factor_mode": "adaptive",
+               "projection_mode": "auto"})
         self.b_constant = ConstantBfovTracker()
         # Bare factor-4 B224, with no geometry/fallback/template machinery.
         # This is an explicit expert rather than an offline result lookup.
@@ -239,6 +261,7 @@ class GeometryRoutedTracker:
         use_t, reasons = route_t224(init_bfov)
         use_fixed, fixed_reasons = route_fixed_b224(init_bfov)
         use_dynamic_polar, dynamic_polar_reasons = route_dynamic_polar_b224(init_bfov)
+        use_ebfov, ebfov_reasons = route_ebfov_special(init_bfov)
         use_constant, constant_reasons = route_conservative_large_target(init_bfov)
         use_noswitch, noswitch_reasons = route_noswitch_b224(init_bfov)
         use_adaptive, adaptive_reasons = route_adaptive_b224(init_bfov)
@@ -252,6 +275,11 @@ class GeometryRoutedTracker:
             self.active = self.b_fixed
             self.selected_method = "sutrack_b224_fixed"
             self.b_fixed.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        elif use_ebfov:
+            self.route_reasons = ebfov_reasons
+            self.active = self.b_ebfov
+            self.selected_method = "sutrack_b224_ebfov"
+            self.b_ebfov.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
         elif use_dynamic_polar:
             self.route_reasons = dynamic_polar_reasons
             self.active = self.b_dynamic_polar
