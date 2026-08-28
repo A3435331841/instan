@@ -23,9 +23,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from scripts.eval_official import run_sequence  # noqa: E402
 from scripts.run_geometry_routed_b224_t224 import (  # noqa: E402
-    GeometryRoutedTracker,
     build_kwargs,
 )
+from scripts.run_probe_b224 import ProbeRouter  # noqa: E402
 from scripts.run_sutrack_b224_redetect import (  # noqa: E402
     SphericalB224RedetectTracker,
 )
@@ -65,8 +65,12 @@ def route_direct_od(init_bfov) -> tuple[bool, list[str]]:
 class GeometryRecoveryTracker:
     def __init__(self, b_model, b_high_model, t_model, od_model,
                  od_first_model, tracker_kwargs, args):
-        self.geometry = GeometryRoutedTracker(
-            b_model, b_high_model, t_model, **tracker_kwargs)
+        # Keep the latest causal B224 probe/fixed/polar policy on the normal
+        # path; direct OD remains an explicitly geometry-gated exception.
+        self.geometry = ProbeRouter(
+            b_model, b_high_model, t_model, tracker_kwargs,
+            probe_frames=6, quality_margin=0.05,
+            factor_quality_margin=-0.04)
         self.recovery = (SphericalB224RedetectTracker(
             b_model, b_high_model, tracker_kwargs,
             run_len=args.run_len,
@@ -110,6 +114,8 @@ class GeometryRecoveryTracker:
         self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
 
     def track(self, frame_rgb, **kwargs):
+        if self.active is self.geometry:
+            self.selected_method = self.geometry.selected_method
         out = dict(self.active.track(frame_rgb, **kwargs))
         out["expert_used"] = out.get("expert_used", self.selected_method)
         out["route_reasons"] = list(self.route_reasons)
