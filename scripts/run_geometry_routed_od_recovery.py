@@ -149,10 +149,11 @@ class GeometryRecoveryTracker:
         self.active = self.geometry
         self.selected_method = "geometry_b224_t224"
         self.route_reasons = []
+        self.narrow_recovery_only = bool(narrow_recovery_only)
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
         use_direct, direct_reasons = route_direct_od(init_bfov)
-        if narrow_recovery_only:
+        if self.narrow_recovery_only:
             use_recovery, reasons = route_narrow_recovery(init_bfov)
         else:
             use_recovery, reasons = route_recovery(init_bfov)
