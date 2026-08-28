@@ -87,7 +87,7 @@ def route_fixed_b224(init_bfov) -> tuple[bool, list[str]]:
     # Very small, near-equatorial views: retain the ordinary factor-4 crop
     # rather than the adaptive factor schedule.  The latitude guard avoids
     # replacing the already validated polar protection.
-    if fh <= 6.0 and fv <= 8.0 and abs(lat) < 35.0:
+    if fh <= 6.0 and fv <= 8.0 and abs(lat) < 45.0:
         return True, ["b224_fixed_tiny_nonpolar"]
     # A narrow compact-scale band where the fixed crop avoids an early
     # adaptive expansion.  Keep the latitude interval tight to limit the
