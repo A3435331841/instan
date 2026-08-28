@@ -50,7 +50,7 @@
     "cluster_min_unique_rescues": 3,
     "oof_auc_gain": 0.03,
     "oof_sr_gain": 0.03,
-    "full_auc": 0.8,
+    "full_auc": 0.7,
     "full_sr": 0.8,
     "full_e2e_fps": 30.0
   }

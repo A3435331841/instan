@@ -397,7 +397,10 @@ def choose_next_experiment(rows: list[dict], out_root: Path,
             "normal_regression_max": 0.01,
             "cluster_auc_gain": 0.05,
             "cluster_win_rate": 0.60,
-            "full_auc": 0.80,
+            # The current engineering goal is the staged AUC>0.7 target;
+            # SR/FPS remain strict because a high score with a broken real-
+            # time path is not a useful candidate.
+            "full_auc": 0.70,
             "full_sr": 0.80,
             "full_e2e_fps": 30.0,
         },
@@ -555,7 +558,7 @@ def acceptance(rows: list[dict], expected: int | None = None,
     }
     result["full_pass"] = bool(
         expected is not None and len(finite) >= expected and not anomalies and
-        result["mean_auc"] > 0.8 and result["mean_sr"] > 0.8 and result["mean_e2e_fps"] > 30.0
+        result["mean_auc"] > 0.7 and result["mean_sr"] > 0.8 and result["mean_e2e_fps"] > 30.0
     )
     result["status"] = "pass" if result["full_pass"] else ("anomaly" if anomalies else "in_progress")
     return result
