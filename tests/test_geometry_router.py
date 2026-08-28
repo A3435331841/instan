@@ -3,6 +3,7 @@ import unittest
 from scripts.run_geometry_routed_b224_t224 import (
     route_adaptive_b224,
     route_dynamic_polar_b224,
+    route_conservative_large_target,
     route_fixed_b224,
     route_noswitch_b224,
     route_t224,
@@ -39,6 +40,10 @@ class GeometryRouterTest(unittest.TestCase):
         self.assertEqual(route_dynamic_polar_b224((0.0, -60.2, 20.1, 26.0))[0], True)
         self.assertEqual(route_dynamic_polar_b224((0.0, -63.3, 15.4, 14.2))[0], False)
         self.assertEqual(route_dynamic_polar_b224((0.0, -70.0, 20.1, 26.0))[0], False)
+
+    def test_conservative_large_target_is_high_latitude_only(self):
+        self.assertEqual(route_conservative_large_target((0.0, -50.7, 158.4, 171.1))[0], True)
+        self.assertEqual(route_conservative_large_target((0.0, -0.2, 183.7, 181.8))[0], False)
 
     def test_fixed_compact_envelope_keeps_polar_views_out(self):
         self.assertEqual(route_fixed_b224((0.0, -7.5, 5.9, 20.3))[0], True)

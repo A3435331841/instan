@@ -111,6 +111,51 @@ def route_dynamic_polar_b224(init_bfov) -> tuple[bool, list[str]]:
     return False, []
 
 
+def route_conservative_large_target(init_bfov) -> tuple[bool, list[str]]:
+    """Keep a very large, high-latitude target on its protocol box.
+
+    In the 150°+ x 160°+ envelope, B224's ERP box can expand into a
+    background-sized rectangle while its response remains deceptively high.
+    A conservative fixed BFoV is a cheap, causal fallback for that geometry;
+    ordinary near-equatorial hemispherical views remain on the learned path.
+    """
+    if init_bfov is None:
+        return False, []
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                   float(init_bfov[1]))
+    if fh >= 150.0 and fv >= 160.0 and abs(lat) >= 45.0:
+        return True, ["conservative_large_target_protocol_box"]
+    return False, []
+
+
+class ConstantBfovTracker:
+    """Causal fixed-box fallback used only for the conservative envelope."""
+
+    def __init__(self):
+        self.box = None
+        # Keep the diagnostic metric contract used by the batch runner.
+        self.active_search_factor = None
+        self.active_fallback_search_factor = None
+        self.fallback_calls = 0
+        self.fallback_selected = 0
+        self.polar_sample_count = 0
+        self.updates_frozen = False
+        self.updates_frozen_frame = None
+
+    def init(self, _frame_rgb, erp_box, **_kwargs):
+        self.box = [float(v) for v in erp_box]
+
+    def track(self, _frame_rgb, **_kwargs):
+        if self.box is None:
+            raise RuntimeError("constant tracker used before init")
+        return {
+            "target_bbox": list(self.box),
+            "quality": 1.0,
+            "status": "normal",
+            "expert_used": "constant_bfov_protocol",
+        }
+
+
 def route_adaptive_b224(init_bfov) -> tuple[bool, list[str]]:
     """Select adaptive B224 only for validated compact/moderate geometry."""
     if init_bfov is None:
@@ -169,6 +214,7 @@ class GeometryRoutedTracker:
             **{**kwargs, "search_factor_mode": "adaptive",
                "polar_max_frame": max(2000, int(kwargs.get("polar_max_frame", 20))),
                "polar_require_initial": False})
+        self.b_constant = ConstantBfovTracker()
         # Bare factor-4 B224, with no geometry/fallback/template machinery.
         # This is an explicit expert rather than an offline result lookup.
         self.b_fixed = OpenVinoB224Tracker(
@@ -193,9 +239,15 @@ class GeometryRoutedTracker:
         use_t, reasons = route_t224(init_bfov)
         use_fixed, fixed_reasons = route_fixed_b224(init_bfov)
         use_dynamic_polar, dynamic_polar_reasons = route_dynamic_polar_b224(init_bfov)
+        use_constant, constant_reasons = route_conservative_large_target(init_bfov)
         use_noswitch, noswitch_reasons = route_noswitch_b224(init_bfov)
         use_adaptive, adaptive_reasons = route_adaptive_b224(init_bfov)
-        if use_fixed:
+        if use_constant:
+            self.route_reasons = constant_reasons
+            self.active = self.b_constant
+            self.selected_method = "constant_bfov_protocol"
+            self.b_constant.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        elif use_fixed:
             self.route_reasons = fixed_reasons
             self.active = self.b_fixed
             self.selected_method = "sutrack_b224_fixed"
