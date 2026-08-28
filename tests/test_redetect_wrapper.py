@@ -8,7 +8,7 @@ from scripts.run_sutrack_b224_redetect import (
     crop_wrap,
 )
 from scripts.run_geometry_routed_od_recovery import route_direct_od, route_recovery
-from scripts.run_probe_b224 import route_probe_b224
+from scripts.run_probe_b224 import route_factor_probe, route_probe_b224
 
 
 class RedetectWrapperTest(unittest.TestCase):
@@ -46,6 +46,12 @@ class RedetectWrapperTest(unittest.TestCase):
         self.assertFalse(route_probe_b224((0.0, 8.7, 9.2, 28.3))[0])
         self.assertFalse(route_probe_b224((0.0, -18.8, 45.6, 90.4))[0])
         self.assertTrue(route_probe_b224((0.0, 0.0, 22.0, 56.0))[0])
+
+    def test_factor_probe_is_limited_to_nonpolar_large_views(self):
+        self.assertTrue(route_factor_probe((0.0, -34.9, 58.1, 108.6))[0])
+        self.assertTrue(route_factor_probe((0.0, -7.9, 88.4, 151.4))[0])
+        self.assertFalse(route_factor_probe((0.0, -50.0, 58.0, 108.0))[0])
+        self.assertFalse(route_factor_probe((0.0, -25.0, 20.0, 40.0))[0])
 
 
 if __name__ == "__main__":

@@ -135,15 +135,106 @@ class ProbeB224Tracker:
         return out
 
 
+def route_factor_probe(init_bfov) -> tuple[bool, list[str]]:
+    """Use a short factor-2/factor-4 probe for large, non-polar views.
+
+    The probe is restricted to the view envelope where the completed sweep
+    exposed opposite factor winners.  It is deliberately a runtime quality
+    decision; the initialization geometry only decides whether paying the
+    six-frame dual warm-up is worthwhile.
+    """
+    if init_bfov is None:
+        return False, ["factor_probe_missing_init_bfov"]
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                   float(init_bfov[1]))
+    if abs(lat) >= 45.0:
+        return False, ["factor_probe_polar_guard"]
+    if 55.0 <= fh < 60.0 and 100.0 <= fv < 120.0:
+        return True, ["factor_probe_large_vertical_view"]
+    # The 88--96 x 133--151 envelope is a separate stable large-view family;
+    # keep it narrow so the known 109--114 x 155 views remain on the safer
+    # geometry route.
+    if 80.0 <= fh < 100.0 and fv >= 130.0:
+        return True, ["factor_probe_mid_large_view"]
+    return False, ["factor_probe_geometry_default"]
+
+
+class FactorProbeB224Tracker:
+    """Choose fixed factor-2 or factor-4 B224 from early response quality."""
+
+    def __init__(self, b_model, probe_frames=6, quality_margin=0.08):
+        self.probe_frames = max(2, int(probe_frames))
+        self.quality_margin = float(quality_margin)
+        common = dict(search_size=224, template_size=112,
+                      template_factor=2.0, update_interval=25,
+                      update_threshold=0.70, search_factor_mode="fixed")
+        self.factor4 = OpenVinoB224Tracker(b_model, search_factor=4.0, **common)
+        self.factor2 = OpenVinoB224Tracker(b_model, search_factor=2.0, **common)
+        self.active = None
+        self.selected_method = "factor_probe_pending"
+        self.route_reasons = ["factor_probe_pending"]
+        self.frame_id = 0
+        self.q4 = []
+        self.q2 = []
+
+    def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
+        self.factor4.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        self.factor2.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        self.active = None
+        self.selected_method = "factor_probe_pending"
+        self.route_reasons = ["factor_probe_pending"]
+        self.frame_id = 0
+        self.q4, self.q2 = [], []
+
+    def _choose(self):
+        med4 = float(np.median(self.q4))
+        med2 = float(np.median(self.q2))
+        # Factor 2 must show a clear early advantage; ties stay on factor 4,
+        # which is the safer general-purpose large-view contract.
+        use2 = med2 > med4 + self.quality_margin
+        self.active = self.factor2 if use2 else self.factor4
+        self.selected_method = ("sutrack_b224_factor2_probe" if use2
+                                else "sutrack_b224_factor4_probe")
+        self.route_reasons = [
+            "factor_probe",
+            "factor2_median_quality=%.4f" % med2,
+            "factor4_median_quality=%.4f" % med4,
+            "factor2_selected=%s" % use2,
+        ]
+
+    def track(self, frame_rgb, **kwargs):
+        self.frame_id += 1
+        if self.active is None:
+            out4 = dict(self.factor4.track(frame_rgb, **kwargs))
+            out2 = dict(self.factor2.track(frame_rgb, **kwargs))
+            self.q4.append(float(out4.get("quality", 0.0)))
+            self.q2.append(float(out2.get("quality", 0.0)))
+            if self.frame_id < self.probe_frames:
+                out4["expert_used"] = "sutrack_b224_factor_probe_warmup"
+                out4["route_reasons"] = list(self.route_reasons)
+                return out4
+            self._choose()
+            out = dict(out2 if self.active is self.factor2 else out4)
+        else:
+            out = dict(self.active.track(frame_rgb, **kwargs))
+        out["expert_used"] = self.selected_method
+        out["route_reasons"] = list(self.route_reasons)
+        return out
+
+
 class ProbeRouter:
     def __init__(self, b_model, b_high_model, t_model, kwargs,
-                 probe_frames=6, quality_margin=0.05):
+                 probe_frames=6, quality_margin=0.05,
+                 factor_quality_margin=-0.04):
         self.b_model = b_model
         self.b_high_model = b_high_model
         self.t_model = t_model
         self.kwargs = kwargs
         self.probe_frames = probe_frames
         self.quality_margin = quality_margin
+        self.factor_probe = FactorProbeB224Tracker(
+            b_model, probe_frames=probe_frames,
+            quality_margin=factor_quality_margin)
         self.probe = ProbeB224Tracker(
             b_model, b_high_model, kwargs, probe_frames, quality_margin)
         self.noswitch = OpenVinoB224Tracker(
@@ -163,6 +254,7 @@ class ProbeRouter:
         self.route_reasons = []
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
+        use_factor, factor_reasons = route_factor_probe(init_bfov)
         use_fixed, fixed_reasons = route_fixed_b224(init_bfov)
         use_t, reasons = route_t224(init_bfov)
         use_noswitch, noswitch_reasons = route_noswitch_b224(init_bfov)
@@ -171,6 +263,11 @@ class ProbeRouter:
             self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
             self.selected_method = "sutrack_b224_fixed"
             self.route_reasons = fixed_reasons
+        elif use_factor:
+            self.active = self.factor_probe
+            self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+            self.selected_method = "factor_probe_pending"
+            self.route_reasons = factor_reasons
         elif use_noswitch:
             self.active = self.noswitch
             self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
@@ -197,6 +294,9 @@ class ProbeRouter:
         if self.active is self.probe:
             self.selected_method = self.probe.selected_method
             out["route_reasons"] = list(self.route_reasons) + list(self.probe.route_reasons)
+        elif self.active is self.factor_probe:
+            self.selected_method = self.factor_probe.selected_method
+            out["route_reasons"] = list(self.route_reasons) + list(self.factor_probe.route_reasons)
         else:
             out["route_reasons"] = list(self.route_reasons)
         out["expert_used"] = self.selected_method
@@ -243,6 +343,11 @@ def main(argv=None) -> int:
     ap.add_argument("--quality-threshold", type=float, default=0.40)
     ap.add_argument("--probe-frames", type=int, default=6)
     ap.add_argument("--quality-margin", type=float, default=0.05)
+    ap.add_argument("--factor-quality-margin", type=float, default=-0.04,
+                    help=("factor-2 may be selected when its warm-up quality "
+                          "is within this margin of factor-4; negative "
+                          "values allow a small deficit when long-view "
+                          "stability is better"))
     args = ap.parse_args(argv)
     import openvino as ov
 
@@ -262,7 +367,8 @@ def main(argv=None) -> int:
 
         def factory(**_kwargs):
             tracker = ProbeRouter(b_model, b_high_model, t_model, kwargs,
-                                  args.probe_frames, args.quality_margin)
+                                  args.probe_frames, args.quality_margin,
+                                  args.factor_quality_margin)
             holder["tracker"] = tracker; return tracker
 
         try:
@@ -276,6 +382,7 @@ def main(argv=None) -> int:
                 "route_reasons": tracker.route_reasons,
                 "probe_frames": args.probe_frames,
                 "quality_margin": args.quality_margin,
+                "factor_quality_margin": args.factor_quality_margin,
                 "e2e_fps": metrics.get("e2e_fps"),
             })
             np.savetxt(seq_out / "results_erp.txt", pred, fmt="%.6f", delimiter=",")
@@ -294,7 +401,8 @@ def main(argv=None) -> int:
             print(f"[{idx}/{len(seqs)}] {seq}: FAILED {exc}", file=sys.stderr, flush=True)
     if rows:
         keys = ["sequence", "selected_method", "n_frames", "n_scored", "auc", "sr",
-                "e2e_fps", "probe_frames", "quality_margin", "route_reasons"]
+                "e2e_fps", "probe_frames", "quality_margin",
+                "factor_quality_margin", "route_reasons"]
         with (out_root / "summary.csv").open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=keys); writer.writeheader()
             writer.writerows({k: row.get(k) for k in keys} for row in rows)
