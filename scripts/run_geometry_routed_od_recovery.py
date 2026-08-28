@@ -155,7 +155,7 @@ class GeometryRecoveryTracker:
         else:
             use_recovery, reasons = route_recovery(init_bfov)
         if use_direct and self.od_direct is not None:
-            use_erp = any("tiny_polar" in reason for reason in direct_reasons)
+            use_erp = any("tiny_polar_direct_od_tangent" in reason for reason in direct_reasons)
             self.active = self.od_direct_erp if use_erp else self.od_direct
             self.selected_method = "odtrack_erp_direct" if use_erp else "odtrack_tangent_direct"
             self.route_reasons = direct_reasons

@@ -20,6 +20,7 @@ import csv
 import json
 import math
 import re
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -32,6 +33,7 @@ except ImportError:  # pragma: no cover - the repo root is supplied by the runne
     erp_bbox_from_bfov = None
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(PROJECT_ROOT))
 DEFAULT_DATA = Path(r"D:\instan\grt360_storage\datasets\official_train\train")
 DEFAULT_TRAIN_LIST = PROJECT_ROOT / "data360" / "official_split" / "seqlist_official_train.txt"
 
