@@ -30,9 +30,10 @@ class GeometryRouterTest(unittest.TestCase):
         self.assertEqual(route_fixed_b224((0.0, -26.6, 5.8, 3.0))[0], True)
         self.assertEqual(route_fixed_b224((0.0, -49.0, 2.5, 4.8))[0], False)
 
-    def test_fixed_compact_scale_band_is_narrow(self):
+    def test_fixed_compact_envelope_keeps_polar_views_out(self):
         self.assertEqual(route_fixed_b224((0.0, -7.5, 5.9, 20.3))[0], True)
-        self.assertEqual(route_fixed_b224((0.0, 16.4, 5.6, 16.0))[0], False)
+        self.assertEqual(route_fixed_b224((0.0, 16.4, 5.6, 16.0))[0], True)
+        self.assertEqual(route_fixed_b224((0.0, -49.0, 2.5, 4.8))[0], False)
 
     def test_tiny_nonpolar_uses_no_switch_b224(self):
         self.assertEqual(route_noswitch_b224((0.0, -49.0, 2.5, 4.8))[0], True)

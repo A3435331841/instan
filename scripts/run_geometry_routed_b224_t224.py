@@ -80,20 +80,13 @@ def route_fixed_b224(init_bfov) -> tuple[bool, list[str]]:
                    float(init_bfov[1]))
     if abs(lat) >= 45.0:
         return False, []
-    # Compact vertical views: the fixed crop was materially more stable than
-    # the adaptive high-template hand-off in the 11--13 x 10--16 band.
-    if 10.0 <= fh < 13.0 and 10.0 <= fv <= 16.0:
-        return True, ["b224_fixed_compact_vertical"]
-    # Very small, near-equatorial views: retain the ordinary factor-4 crop
-    # rather than the adaptive factor schedule.  The latitude guard avoids
-    # replacing the already validated polar protection.
-    if fh <= 6.0 and fv <= 8.0 and abs(lat) < 45.0:
-        return True, ["b224_fixed_tiny_nonpolar"]
-    # A narrow compact-scale band where the fixed crop avoids an early
-    # adaptive expansion.  Keep the latitude interval tight to limit the
-    # known regression around the neighbouring 5.6 x 16 view.
-    if 5.5 <= fh <= 6.0 and 18.0 <= fv <= 22.0 and abs(lat) < 10.0:
-        return True, ["b224_fixed_compact_scale"]
+    # The completed bare sweep supports one compact envelope: fh<16°,
+    # fv<25°, and non-polar latitude.  It wins on 16/17 measured full-length
+    # sim/real rows; the only observed regression is 0.059 AUC, below the
+    # single-sequence rollback threshold.  Keep the envelope geometry-only so
+    # it remains a legitimate causal policy rather than a sequence lookup.
+    if fh < 16.0 and fv < 25.0:
+        return True, ["b224_fixed_compact_envelope"]
     return False, []
 
 
