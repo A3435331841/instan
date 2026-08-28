@@ -30,6 +30,8 @@ class RedetectWrapperTest(unittest.TestCase):
 
     def test_recovery_gate_is_geometry_only(self):
         self.assertTrue(route_recovery((0.0, -20.0, 72.0, 140.0))[0])
+        self.assertTrue(route_recovery((0.0, -56.0, 37.0, 73.0))[0])
+        self.assertFalse(route_recovery((0.0, -35.0, 58.0, 109.0))[0])
         self.assertFalse(route_recovery((0.0, -20.0, 20.0, 30.0))[0])
 
 

@@ -35,9 +35,16 @@ def route_recovery(init_bfov) -> tuple[bool, list[str]]:
     """Select the recovery branch from initialization geometry only."""
     if init_bfov is None:
         return False, ["missing_init_bfov"]
-    fh, fv = float(init_bfov[2]), float(init_bfov[3])
-    if fv >= 100.0 or fh >= 90.0:
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                   float(init_bfov[1]))
+    # The long eBFoV probe is useful when the horizontal view is already
+    # broad (or the vertical view is near a hemisphere).  A separate
+    # high-latitude medium-view band covers the observed small/scale loss
+    # regime without sending ordinary 50--60° views through the slow expert.
+    if fh >= 70.0 or fv >= 130.0:
         return True, ["large_fov_sparse_od_recovery"]
+    if 30.0 <= fh <= 50.0 and 65.0 <= fv <= 100.0 and abs(lat) >= 40.0:
+        return True, ["high_lat_medium_sparse_od_recovery"]
     return False, ["geometry_b224_t224_router"]
 
 
