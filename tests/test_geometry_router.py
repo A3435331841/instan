@@ -2,6 +2,7 @@ import unittest
 
 from scripts.run_geometry_routed_b224_t224 import (
     route_adaptive_b224,
+    route_dynamic_polar_b224,
     route_fixed_b224,
     route_noswitch_b224,
     route_t224,
@@ -29,6 +30,15 @@ class GeometryRouterTest(unittest.TestCase):
     def test_fixed_tiny_band_excludes_polar_views(self):
         self.assertEqual(route_fixed_b224((0.0, -26.6, 5.8, 3.0))[0], True)
         self.assertEqual(route_fixed_b224((0.0, -49.0, 2.5, 4.8))[0], False)
+
+    def test_fixed_special_polar_bands_are_causal(self):
+        self.assertEqual(route_fixed_b224((0.0, -87.8, 4.1, 4.9))[0], True)
+        self.assertEqual(route_fixed_b224((0.0, -78.9, 30.3, 30.4))[0], True)
+
+    def test_dynamic_polar_band_is_mid_latitude_only(self):
+        self.assertEqual(route_dynamic_polar_b224((0.0, -60.2, 20.1, 26.0))[0], True)
+        self.assertEqual(route_dynamic_polar_b224((0.0, -63.3, 15.4, 14.2))[0], False)
+        self.assertEqual(route_dynamic_polar_b224((0.0, -70.0, 20.1, 26.0))[0], False)
 
     def test_fixed_compact_envelope_keeps_polar_views_out(self):
         self.assertEqual(route_fixed_b224((0.0, -7.5, 5.9, 20.3))[0], True)

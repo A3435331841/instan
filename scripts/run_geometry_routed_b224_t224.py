@@ -78,6 +78,15 @@ def route_fixed_b224(init_bfov) -> tuple[bool, list[str]]:
         return False, []
     fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
                    float(init_bfov[1]))
+    # Two completed full-length probes support the unmodified factor-4 crop
+    # for an extreme tiny pole and for the narrow 30x30 high-latitude band.
+    # These cases are safer without the adaptive/polar hand-off, which was
+    # repeatedly locking onto a neighbouring ERP peak.
+    if abs(lat) >= 85.0 and fh < 6.0 and fv < 6.0:
+        return True, ["b224_fixed_extreme_polar_tiny"]
+    if (abs(lat) >= 75.0 and 28.0 <= fh <= 33.0 and
+            28.0 <= fv <= 33.0):
+        return True, ["b224_fixed_high_lat_medium"]
     if abs(lat) >= 45.0:
         return False, []
     # The completed bare sweep supports one compact envelope: fh<16°,
@@ -87,6 +96,18 @@ def route_fixed_b224(init_bfov) -> tuple[bool, list[str]]:
     # it remains a legitimate causal policy rather than a sequence lookup.
     if fh < 16.0 and fv < 25.0:
         return True, ["b224_fixed_compact_envelope"]
+    return False, []
+
+
+def route_dynamic_polar_b224(init_bfov) -> tuple[bool, list[str]]:
+    """Enable polar rectification after the target moves into a mid-latitude pole."""
+    if init_bfov is None:
+        return False, []
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                   float(init_bfov[1]))
+    if (55.0 <= abs(lat) < 65.0 and 18.0 <= fh < 25.0 and
+            20.0 <= fv < 35.0):
+        return True, ["b224_dynamic_polar_mid_lat"]
     return False, []
 
 
@@ -143,6 +164,11 @@ class GeometryRoutedTracker:
             template_factor=float(kwargs.get("template_factor", 2.0)),
             update_interval=25, update_threshold=0.70,
             search_factor_mode="adaptive", **fast_kwargs)
+        self.b_dynamic_polar = MotionAdaptiveTracker(
+            b_model, b_high_model,
+            **{**kwargs, "search_factor_mode": "adaptive",
+               "polar_max_frame": max(2000, int(kwargs.get("polar_max_frame", 20))),
+               "polar_require_initial": False})
         # Bare factor-4 B224, with no geometry/fallback/template machinery.
         # This is an explicit expert rather than an offline result lookup.
         self.b_fixed = OpenVinoB224Tracker(
@@ -166,6 +192,7 @@ class GeometryRoutedTracker:
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
         use_t, reasons = route_t224(init_bfov)
         use_fixed, fixed_reasons = route_fixed_b224(init_bfov)
+        use_dynamic_polar, dynamic_polar_reasons = route_dynamic_polar_b224(init_bfov)
         use_noswitch, noswitch_reasons = route_noswitch_b224(init_bfov)
         use_adaptive, adaptive_reasons = route_adaptive_b224(init_bfov)
         if use_fixed:
@@ -173,6 +200,11 @@ class GeometryRoutedTracker:
             self.active = self.b_fixed
             self.selected_method = "sutrack_b224_fixed"
             self.b_fixed.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        elif use_dynamic_polar:
+            self.route_reasons = dynamic_polar_reasons
+            self.active = self.b_dynamic_polar
+            self.selected_method = "sutrack_b224_dynamic_polar"
+            self.b_dynamic_polar.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
         elif use_noswitch:
             self.route_reasons = noswitch_reasons
             self.active = self.b_noswitch
