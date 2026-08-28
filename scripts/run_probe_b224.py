@@ -342,7 +342,8 @@ class PresenceGatedTracker:
     annotates the trace; it never reads GT, sequence names, or a result table.
     """
 
-    def __init__(self, router, policy: LinearRiskPolicy):
+    def __init__(self, router, policy: LinearRiskPolicy, hold_on_risk: bool = False,
+                 recovery_frames: int = 3):
         self.router = router
         self.policy = policy
         self.selected_method = "presence_pending"
@@ -355,6 +356,11 @@ class PresenceGatedTracker:
         self.last_risk = 0.0
         self.last_blocked = False
         self.last_features = None
+        self.hold_on_risk = bool(hold_on_risk)
+        self.recovery_frames = max(1, int(recovery_frames))
+        self.hold_active = False
+        self.hold_good = 0
+        self.last_reliable_box = None
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
         self.router.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
@@ -367,6 +373,9 @@ class PresenceGatedTracker:
         self.last_risk = 0.0
         self.last_blocked = False
         self.last_features = None
+        self.hold_active = False
+        self.hold_good = 0
+        self.last_reliable_box = [float(v) for v in erp_box[:4]]
         _set_external_update_block(self.router, False)
 
     def _features(self, out):
@@ -443,6 +452,22 @@ class PresenceGatedTracker:
             self.route_reasons.append("presence_policy_probe")
             if str(out.get("status", "normal")) == "normal":
                 out["status"] = "suspect"
+            self.hold_active = self.hold_on_risk
+            self.hold_good = 0
+        elif self.hold_active:
+            self.hold_good += 1
+            if self.hold_good >= self.recovery_frames:
+                self.hold_active = False
+        if self.hold_active and self.last_reliable_box is not None:
+            # Holding the last causal reliable state is useful for long
+            # appearance drops, but remains opt-in because a static hold can
+            # hurt genuinely fast motion.  The underlying tracker still runs
+            # and is re-used after the recovery hysteresis clears.
+            out["target_bbox"] = list(self.last_reliable_box)
+            out["status"] = "suspect"
+            self.route_reasons.append("presence_hold_last_reliable")
+        elif not blocked:
+            self.last_reliable_box = [float(v) for v in out.get("target_bbox", self.last_reliable_box)[:4]]
         out["presence_risk"] = risk
         out["presence_probe"] = blocked
         out["update_blocked_by_presence"] = bool(self.last_blocked)
@@ -498,6 +523,9 @@ def main(argv=None) -> int:
                           "stability is better"))
     ap.add_argument("--presence-policy", default=None,
                     help="optional CPU-trained LinearRiskPolicy JSON; diagnostics/guard only until OOF promotion")
+    ap.add_argument("--presence-hold", action="store_true",
+                    help="on a high causal risk score, hold the last reliable box until recovery hysteresis clears")
+    ap.add_argument("--presence-recovery-frames", type=int, default=3)
     args = ap.parse_args(argv)
     import openvino as ov
 
@@ -521,7 +549,9 @@ def main(argv=None) -> int:
                                   args.probe_frames, args.quality_margin,
                                   args.factor_quality_margin)
             if presence_policy is not None:
-                tracker = PresenceGatedTracker(tracker, presence_policy)
+                tracker = PresenceGatedTracker(
+                    tracker, presence_policy, hold_on_risk=args.presence_hold,
+                    recovery_frames=args.presence_recovery_frames)
             holder["tracker"] = tracker; return tracker
 
         try:
@@ -537,6 +567,8 @@ def main(argv=None) -> int:
                 "quality_margin": args.quality_margin,
                 "factor_quality_margin": args.factor_quality_margin,
                 "presence_policy": str(Path(args.presence_policy).resolve()) if args.presence_policy else None,
+                "presence_hold": bool(args.presence_hold),
+                "presence_recovery_frames": int(args.presence_recovery_frames),
                 "e2e_fps": metrics.get("e2e_fps"),
             })
             np.savetxt(seq_out / "results_erp.txt", pred, fmt="%.6f", delimiter=",")

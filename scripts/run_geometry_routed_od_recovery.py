@@ -71,9 +71,36 @@ def route_direct_od(init_bfov) -> tuple[bool, list[str]]:
     return False, []
 
 
+def route_narrow_recovery(init_bfov) -> tuple[bool, list[str]]:
+    """Select only geometry families with a completed full-sequence rescue.
+
+    The broad sparse-OD policy was useful for exploratory 450-frame screens,
+    but its false accepts are not safe to promote.  These envelopes are
+    deliberately expressed only in the initialization BFoV and were chosen
+    from paired full-sequence runs: the 110x155 eBFoV drift family, the nearly
+    hemispherical near-equator family, and the 69x83 high-latitude family.
+    ``--narrow-recovery-only`` makes this conservative policy explicit while
+    retaining the older broad mode for historical experiments.
+    """
+    if init_bfov is None:
+        return False, []
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                   float(init_bfov[1]))
+    if 100.0 <= fh <= 120.0 and 150.0 <= fv <= 160.0 and abs(lat) <= 35.0:
+        return True, ["narrow_long_ebfov_redetect"]
+    # Keep the near-equator hemispherical branch narrow: the nearby -4°
+    # sequence is a different motion regime and has no validated rescue yet.
+    if fh >= 175.0 and fv >= 175.0 and abs(lat) < 2.0:
+        return True, ["narrow_hemisphere_equator_redetect"]
+    if 65.0 <= fh <= 72.0 and 80.0 <= fv <= 86.0 and 45.0 <= abs(lat) <= 60.0:
+        return True, ["narrow_high_lat_medium_redetect"]
+    return False, []
+
+
 class GeometryRecoveryTracker:
     def __init__(self, b_model, b_high_model, t_model, od_model,
-                 od_first_model, tracker_kwargs, args, enable_recovery=True):
+                 od_first_model, tracker_kwargs, args, enable_recovery=True,
+                 narrow_recovery_only=False):
         # Keep the latest causal B224 probe/fixed/polar policy on the normal
         # path; direct OD remains an explicitly geometry-gated exception.
         self.geometry = ProbeRouter(
@@ -107,7 +134,10 @@ class GeometryRecoveryTracker:
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
         use_direct, direct_reasons = route_direct_od(init_bfov)
-        use_recovery, reasons = route_recovery(init_bfov)
+        if narrow_recovery_only:
+            use_recovery, reasons = route_narrow_recovery(init_bfov)
+        else:
+            use_recovery, reasons = route_recovery(init_bfov)
         if use_direct and self.od_direct is not None:
             self.active = self.od_direct
             self.selected_method = "odtrack_tangent_direct"
@@ -156,6 +186,8 @@ def main(argv=None) -> int:
     ap.add_argument("--od-quality-threshold", type=float, default=0.45)
     ap.add_argument("--direct-only", action="store_true",
                     help="disable broad sparse-recovery routing; keep only narrow direct-OD geometry gates")
+    ap.add_argument("--narrow-recovery-only", action="store_true",
+                    help="use only completed full-sequence geometry rescue envelopes; disable broad exploratory recovery")
     args = ap.parse_args(argv)
     import openvino as ov
 
@@ -182,7 +214,8 @@ def main(argv=None) -> int:
         def factory(**_kwargs):
             tracker = GeometryRecoveryTracker(
                 b_model, b_high_model, t_model, od_model, od_first_model,
-                tracker_kwargs, args, enable_recovery=not args.direct_only)
+                tracker_kwargs, args, enable_recovery=not args.direct_only,
+                narrow_recovery_only=args.narrow_recovery_only)
             holder["tracker"] = tracker
             return tracker
 
@@ -200,6 +233,7 @@ def main(argv=None) -> int:
                               if tracker.recovery is not None else 0),
                 "od_selected": (tracker.recovery.od_selected
                                  if tracker.recovery is not None else 0),
+                "narrow_recovery_only": bool(args.narrow_recovery_only),
             })
             np.savetxt(seq_out / "results_erp.txt", pred, fmt="%.6f", delimiter=",")
             np.savetxt(seq_out / "quality.txt", qualities, fmt="%.6f")
