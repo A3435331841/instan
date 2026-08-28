@@ -68,9 +68,9 @@ def route_direct_od(init_bfov) -> tuple[bool, list[str]]:
     # tiny-polar case where the tangent OD expert beats B224 materially.  Keep
     # its geometry envelope narrow; nearby 4--8° targets have validated T/B
     # routes and must not inherit the ~20 FPS OD path blindly.
-    if 8.5 <= fh < 10.0 and 8.0 <= fv < 10.5 and 65.0 <= abs(lat) < 75.0:
-        return True, ["tiny_polar_9deg_direct_od_tangent"]
-    if 8.0 <= fh < 10.0 and 25.0 <= fv < 32.0 and abs(lat) < 20.0:
+    if 8.5 <= fh < 10.0 and 8.0 <= fv < 10.5 and 65.0 <= abs(lat) < 69.9:
+        return True, ["tiny_polar_9deg_direct_od"]
+    if 8.0 <= fh < 10.0 and 25.0 <= fv < 32.0 and 3.0 <= abs(lat) < 20.0:
         return True, ["compact_direct_od_tangent"]
     if 20.5 <= fh < 23.0 and 45.0 <= fv < 50.0 and abs(lat) < 35.0:
         return True, ["mid_large_direct_od_tangent"]
