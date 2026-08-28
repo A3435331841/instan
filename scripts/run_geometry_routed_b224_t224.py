@@ -35,13 +35,18 @@ def route_t224(init_bfov) -> tuple[bool, list[str]]:
     if init_bfov is None:
         return False, ["missing_init_bfov_b224_fallback"]
     fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]), float(init_bfov[1]))
-    # These bands came from the pre-registered 8-sequence factor sweep.  They
-    # distinguish compact, non-extreme-pole targets from the high-latitude
-    # 8--12-degree regime in which B224's memory branch is more reliable.
+    # These bands came from the pre-registered compact-target sweep, then
+    # received a geometry-only safety belt after the 130-sequence diagnostic.
+    # The vertical-FoV guard keeps the fast model away from narrow targets
+    # whose apparent scale/absence dynamics made T224 materially worse.  The
+    # extra 5.8--6/18--23 band is retained because it is a distinct compact
+    # geometry in which T224 produced a large, repeatable rescue.
     if fh <= 6.0 and abs(lat) < 85.0:
-        return True, ["compact_fov_h_le_6", "non_extreme_pole"]
+        if fv <= 12.5 or (5.8 <= fh <= 6.0 and 18.0 <= fv <= 23.0 and abs(lat) < 30.0):
+            return True, ["compact_fov_h_le_6", "safe_vertical_band", "non_extreme_pole"]
     if 10.0 <= fh < 15.0 and abs(lat) < 65.0:
-        return True, ["compact_fov_h_10_15", "non_polar"]
+        if fv <= 12.5 or fh >= 14.5:
+            return True, ["compact_fov_h_10_15", "safe_vertical_band", "non_polar"]
     return False, ["b224_geometry_default"]
 
 
@@ -52,6 +57,12 @@ def route_adaptive_b224(init_bfov) -> tuple[bool, list[str]]:
     fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]), float(init_bfov[1]))
     if abs(lat) >= 65.0 and fh < 30.0 and fv < 60.0:
         return True, ["b224_adaptive_high_lat_compact"]
+    # A narrow high-latitude failure band was isolated in the full diagnostic
+    # (roughly 30x30 degrees).  Keep the conservative large-FoV B224 policy
+    # there; this condition is causal geometry only and does not encode a
+    # sequence identity or an offline result lookup.
+    if abs(lat) >= 65.0 and 29.0 <= fh <= 32.0 and 25.0 <= fv <= 35.0:
+        return False, ["b224_geometry_high_lat_safety_band"]
     # The factor-3.5 branch is retained for moderate views wide enough to
     # benefit from denser context.  Narrow 20--25 degree views are left on
     # the conservative large_fov policy because the sweep exposed regressions

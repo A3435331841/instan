@@ -5,7 +5,13 @@ from scripts.run_geometry_routed_b224_t224 import route_adaptive_b224, route_t22
 
 class GeometryRouterTest(unittest.TestCase):
     def test_compact_nonpolar_uses_fast_expert(self):
-        self.assertEqual(route_t224((0.0, 10.0, 12.0, 25.0))[0], True)
+        self.assertEqual(route_t224((0.0, 10.0, 12.0, 12.0))[0], True)
+
+    def test_narrow_vertical_risk_band_keeps_b224(self):
+        self.assertEqual(route_t224((0.0, 10.0, 12.0, 25.0))[0], False)
+
+    def test_compact_rescue_band_keeps_fast_expert(self):
+        self.assertEqual(route_t224((0.0, -8.0, 5.9, 20.0))[0], True)
 
     def test_tiny_extreme_pole_stays_on_b224(self):
         self.assertEqual(route_t224((0.0, -87.0, 4.0, 5.0))[0], False)
@@ -18,6 +24,9 @@ class GeometryRouterTest(unittest.TestCase):
 
     def test_moderate_fov_uses_adaptive_b224(self):
         self.assertEqual(route_adaptive_b224((0.0, 0.0, 42.0, 66.0))[0], True)
+
+    def test_high_latitude_safety_band_keeps_default_b224(self):
+        self.assertEqual(route_adaptive_b224((0.0, -79.0, 30.3, 30.4))[0], False)
 
     def test_narrow_normal_view_keeps_default_b224(self):
         self.assertEqual(route_adaptive_b224((0.0, -25.0, 23.5, 48.5))[0], False)
