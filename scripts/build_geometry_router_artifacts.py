@@ -153,7 +153,10 @@ def main(argv=None) -> int:
     for tag in ["all"] + tags + ["routed_t224", "routed_b224"]:
         subset = rows if tag == "all" else (
             [r for r in rows if tag in r["scene_tags"].split(";")] if tag not in {"routed_t224", "routed_b224"}
-            else [r for r in rows if r["selected_method"] == tag.replace("routed_", "sutrack_")])
+            else [r for r in rows if r["selected_method"] in {
+                tag.replace("routed_", "sutrack_"),
+                "sutrack_b224_noswitch" if tag == "routed_b224" else "__never__",
+            }])
         if subset:
             s = _summary(subset, tag); s["scene_tag"] = tag; scenario_rows.append(s)
     with (out / "scenario_summary.csv").open("w", newline="", encoding="utf-8") as f:
@@ -187,6 +190,9 @@ def main(argv=None) -> int:
             "recovery: fov_h>=70 or fov_v>=130 -> sparse OD tangent recovery",
             "recovery: (30<=fov_h<=50 and 65<=fov_v<=100 and abs(lat)>=40) -> sparse OD tangent recovery",
             "recovery: (60<=fov_h<80 and 75<=fov_v<100 and abs(lat)>=40) -> sparse OD tangent recovery",
+            "fov_h<=6 and abs(lat)<65 and fov_v<=8 -> B224 without high-template switch",
+            "5.5<=fov_h<=6 and 14<=fov_v<=22 and abs(lat)<30 -> B224 without high-template switch",
+            "10<=fov_h<13 and 10<=fov_v<=18 and abs(lat)<45 -> B224 without high-template switch",
         ],
         "forbidden": ["sequence_name", "ground_truth", "offline_result_lookup"],
         "candidate": full,

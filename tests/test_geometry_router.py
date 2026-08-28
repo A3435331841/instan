@@ -1,6 +1,10 @@
 import unittest
 
-from scripts.run_geometry_routed_b224_t224 import route_adaptive_b224, route_t224
+from scripts.run_geometry_routed_b224_t224 import (
+    route_adaptive_b224,
+    route_noswitch_b224,
+    route_t224,
+)
 
 
 class GeometryRouterTest(unittest.TestCase):
@@ -10,8 +14,18 @@ class GeometryRouterTest(unittest.TestCase):
     def test_narrow_vertical_risk_band_keeps_b224(self):
         self.assertEqual(route_t224((0.0, 10.0, 12.0, 25.0))[0], False)
 
-    def test_compact_rescue_band_keeps_fast_expert(self):
-        self.assertEqual(route_t224((0.0, -8.0, 5.9, 20.0))[0], True)
+    def test_compact_rescue_band_uses_no_switch_b224(self):
+        self.assertEqual(route_t224((0.0, -8.0, 5.9, 20.0))[0], False)
+        self.assertEqual(route_noswitch_b224((0.0, -8.0, 5.9, 20.0))[0], True)
+
+    def test_tiny_nonpolar_uses_no_switch_b224(self):
+        self.assertEqual(route_noswitch_b224((0.0, -49.0, 2.5, 4.8))[0], True)
+
+    def test_high_lat_compact_vertical_view_keeps_existing_route(self):
+        self.assertEqual(route_noswitch_b224((0.0, -55.0, 11.6, 14.8))[0], False)
+
+    def test_extreme_pole_stays_on_fast_expert(self):
+        self.assertEqual(route_noswitch_b224((0.0, -80.0, 5.5, 5.2))[0], False)
 
     def test_tiny_extreme_pole_stays_on_b224(self):
         self.assertEqual(route_t224((0.0, -87.0, 4.0, 5.0))[0], False)

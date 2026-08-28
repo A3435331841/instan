@@ -39,15 +39,32 @@ def route_t224(init_bfov) -> tuple[bool, list[str]]:
     # received a geometry-only safety belt after the 130-sequence diagnostic.
     # The vertical-FoV guard keeps the fast model away from narrow targets
     # whose apparent scale/absence dynamics made T224 materially worse.  The
-    # extra 5.8--6/18--23 band is retained because it is a distinct compact
-    # geometry in which T224 produced a large, repeatable rescue.
+    # wider compact bands are handled by the no-switch B224 expert below.
     if fh <= 6.0 and abs(lat) < 85.0:
-        if fv <= 12.5 or (5.8 <= fh <= 6.0 and 18.0 <= fv <= 23.0 and abs(lat) < 30.0):
+        if fv <= 12.5:
             return True, ["compact_fov_h_le_6", "safe_vertical_band", "non_extreme_pole"]
     if 10.0 <= fh < 15.0 and abs(lat) < 65.0:
         if fv <= 12.5 or fh >= 14.5:
             return True, ["compact_fov_h_10_15", "safe_vertical_band", "non_polar"]
     return False, ["b224_geometry_default"]
+
+
+def route_noswitch_b224(init_bfov) -> tuple[bool, list[str]]:
+    """Select B224 without the high-template switch in compact risk bands."""
+    if init_bfov is None:
+        return False, []
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                   float(init_bfov[1]))
+    if abs(lat) >= 65.0:
+        return False, []
+    if fh <= 6.0 and fv <= 8.0:
+        return True, ["b224_noswitch_tiny_safe"]
+    if (5.5 <= fh <= 6.0 and 14.0 <= fv <= 22.0 and
+            abs(lat) < 30.0):
+        return True, ["b224_noswitch_compact_scale_safe"]
+    if 10.0 <= fh < 13.0 and 10.0 <= fv <= 18.0 and abs(lat) < 45.0:
+        return True, ["b224_noswitch_compact_vertical_safe"]
+    return False, []
 
 
 def route_adaptive_b224(init_bfov) -> tuple[bool, list[str]]:
@@ -97,6 +114,12 @@ class GeometryRoutedTracker:
             "small_template_width", "small_template_require_initial", "projection_mode",
         }
         fast_kwargs = {k: v for k, v in kwargs.items() if k in tracker_keys}
+        self.b_noswitch = OpenVinoB224Tracker(
+            b_model, search_size=224, template_size=112,
+            search_factor=float(kwargs.get("search_factor", 4.0)),
+            template_factor=float(kwargs.get("template_factor", 2.0)),
+            update_interval=25, update_threshold=0.70,
+            search_factor_mode="adaptive", **fast_kwargs)
         # T224 IR has the same 224 search and 112 template tensor contract;
         # its own adaptive factor logic is retained, but no B high-template
         # model is called on this branch.
@@ -111,17 +134,25 @@ class GeometryRoutedTracker:
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
         use_t, reasons = route_t224(init_bfov)
+        use_noswitch, noswitch_reasons = route_noswitch_b224(init_bfov)
         use_adaptive, adaptive_reasons = route_adaptive_b224(init_bfov)
-        self.route_reasons = reasons + adaptive_reasons
-        if use_t:
+        if use_noswitch:
+            self.route_reasons = noswitch_reasons
+            self.active = self.b_noswitch
+            self.selected_method = "sutrack_b224_noswitch"
+            self.b_noswitch.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        elif use_t:
+            self.route_reasons = reasons + adaptive_reasons
             self.active = self.t
             self.selected_method = "sutrack_t224"
             self.t.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
         elif use_adaptive:
+            self.route_reasons = reasons + adaptive_reasons
             self.active = self.b_adaptive
             self.selected_method = "sutrack_b224"
             self.b_adaptive.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
         else:
+            self.route_reasons = reasons
             self.active = self.b_default
             self.selected_method = "sutrack_b224"
             self.b_default.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
@@ -134,7 +165,7 @@ class GeometryRoutedTracker:
 
     @property
     def base(self):
-        return self.active.base if isinstance(self.active, MotionAdaptiveTracker) else self.b_default.base
+        return self.active.base if isinstance(self.active, MotionAdaptiveTracker) else self.active
 
     @property
     def switch_frame(self):
