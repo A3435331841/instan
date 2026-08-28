@@ -73,7 +73,7 @@ def route_direct_od(init_bfov) -> tuple[bool, list[str]]:
 
 class GeometryRecoveryTracker:
     def __init__(self, b_model, b_high_model, t_model, od_model,
-                 od_first_model, tracker_kwargs, args):
+                 od_first_model, tracker_kwargs, args, enable_recovery=True):
         # Keep the latest causal B224 probe/fixed/polar policy on the normal
         # path; direct OD remains an explicitly geometry-gated exception.
         self.geometry = ProbeRouter(
@@ -94,7 +94,7 @@ class GeometryRecoveryTracker:
             od_cadence=args.od_cadence,
             od_lost_cadence=args.od_lost_cadence,
             od_quality_threshold=args.od_quality_threshold)
-                       if od_model is not None else None)
+                       if od_model is not None and enable_recovery else None)
         self.od_direct = (OpenVinoODTrackTracker(
             od_model, search_size=384, template_size=192,
             search_factor=5.0, template_factor=2.0,
@@ -154,6 +154,8 @@ def main(argv=None) -> int:
     ap.add_argument("--od-cadence", type=int, default=30)
     ap.add_argument("--od-lost-cadence", type=int, default=5)
     ap.add_argument("--od-quality-threshold", type=float, default=0.45)
+    ap.add_argument("--direct-only", action="store_true",
+                    help="disable broad sparse-recovery routing; keep only narrow direct-OD geometry gates")
     args = ap.parse_args(argv)
     import openvino as ov
 
@@ -180,7 +182,7 @@ def main(argv=None) -> int:
         def factory(**_kwargs):
             tracker = GeometryRecoveryTracker(
                 b_model, b_high_model, t_model, od_model, od_first_model,
-                tracker_kwargs, args)
+                tracker_kwargs, args, enable_recovery=not args.direct_only)
             holder["tracker"] = tracker
             return tracker
 
