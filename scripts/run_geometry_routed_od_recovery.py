@@ -74,6 +74,8 @@ def route_direct_od(init_bfov) -> tuple[bool, list[str]]:
         return True, ["compact_direct_od_tangent"]
     if 20.5 <= fh < 23.0 and 45.0 <= fv < 50.0 and abs(lat) < 35.0:
         return True, ["mid_large_direct_od_tangent"]
+    if 35.0 <= fh < 40.0 and 70.0 <= fv < 76.0 and 50.0 <= abs(lat) < 60.0:
+        return True, ["high_lat_medium_direct_od_tangent"]
     return False, []
 
 

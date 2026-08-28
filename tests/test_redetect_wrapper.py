@@ -45,6 +45,7 @@ class RedetectWrapperTest(unittest.TestCase):
         self.assertFalse(route_direct_od((0.0, -70.0, 9.2, 9.0))[0])
         self.assertTrue(route_direct_od((0.0, 8.7, 9.2, 28.3))[0])
         self.assertTrue(route_direct_od((0.0, -27.5, 21.0, 47.7))[0])
+        self.assertTrue(route_direct_od((0.0, -56.0, 37.3, 72.8))[0])
         self.assertFalse(route_direct_od((0.0, 10.0, 20.5, 55.6))[0])
 
     def test_narrow_recovery_uses_only_validated_geometry_families(self):
