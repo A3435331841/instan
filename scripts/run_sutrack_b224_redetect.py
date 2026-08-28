@@ -74,7 +74,7 @@ class SphericalB224RedetectTracker:
                  anchor_min_similarity=0.50, max_motion_deg=120.0,
                  erp_downscale=3, od_model=None, od_first_model=None,
                  od_projection="tangent", od_cadence=15,
-                 od_quality_threshold=0.55):
+                 od_lost_cadence=5, od_quality_threshold=0.55):
         self.b_model = b_model
         self.b_high_model = b_high_model
         self.tracker_kwargs = dict(tracker_kwargs)
@@ -90,6 +90,7 @@ class SphericalB224RedetectTracker:
         self.max_motion_deg = float(max_motion_deg)
         self.erp_downscale = max(1, int(erp_downscale))
         self.od_cadence = max(1, int(od_cadence))
+        self.od_lost_cadence = max(1, int(od_lost_cadence))
         self.od_quality_threshold = float(od_quality_threshold)
         self.od = (OpenVinoODTrackTracker(
             od_model, search_size=384, template_size=192,
@@ -207,12 +208,21 @@ class SphericalB224RedetectTracker:
         payload.update(extra)
         return payload
 
+    def _run_od(self, frame_rgb):
+        if self.od is None:
+            return None
+        out = dict(self.od.track(frame_rgb))
+        self.od_calls += 1
+        return out
+
     def track(self, frame_rgb, **kwargs):
         self.frame_id += 1
         od_out = None
-        if self.od is not None and self.frame_id % self.od_cadence == 0:
-            od_out = dict(self.od.track(frame_rgb))
-            self.od_calls += 1
+        if self.od is not None:
+            cadence = (self.od_lost_cadence if self.status == "lost"
+                       else self.od_cadence)
+            if self.frame_id % cadence == 0:
+                od_out = self._run_od(frame_rgb)
         if self.status == "lost":
             # A sparse ODTrack tangent prediction gets first refusal in LOST.
             # It is accepted only after the same anchor/motion verification as
@@ -291,6 +301,10 @@ class SphericalB224RedetectTracker:
         elif self.low_run >= self.run_len:
             self.status = "lost"
             self.search_counter = 0
+            # Do not wait for the normal cadence on the transition frame: the
+            # B224 quality signal is the causal trigger for a recovery probe.
+            if od_out is None and self.od is not None:
+                od_out = self._run_od(frame_rgb)
             if od_out is not None:
                 od_box = [float(v) for v in od_out["target_bbox"]]
                 od_quality = float(od_out.get("quality", 0.0))
@@ -343,6 +357,8 @@ def main(argv=None) -> int:
                     help="optional ODTrack first-step graph")
     ap.add_argument("--od-projection", choices=["erp", "tangent"], default="tangent")
     ap.add_argument("--od-cadence", type=int, default=15)
+    ap.add_argument("--od-lost-cadence", type=int, default=5,
+                    help="OD cadence while B224 is in LOST")
     ap.add_argument("--od-quality-threshold", type=float, default=0.55)
     args = ap.parse_args(argv)
     import openvino as ov
@@ -378,6 +394,7 @@ def main(argv=None) -> int:
                 od_model=od_model, od_first_model=od_first_model,
                 od_projection=args.od_projection,
                 od_cadence=args.od_cadence,
+                od_lost_cadence=args.od_lost_cadence,
                 od_quality_threshold=args.od_quality_threshold)
             holder["tracker"] = tracker
             return tracker
@@ -394,6 +411,9 @@ def main(argv=None) -> int:
                 "redetect_min_score": args.min_score,
                 "anchor_min_similarity": args.anchor_min_similarity,
                 "erp_downscale": args.erp_downscale,
+                "od_cadence": args.od_cadence,
+                "od_lost_cadence": args.od_lost_cadence,
+                "od_quality_threshold": args.od_quality_threshold,
                 "redetect_calls": tracker.redetect_calls,
                 "redetect_hits": tracker.redetect_hits,
                 "last_candidate_similarity": tracker.last_candidate_similarity,
