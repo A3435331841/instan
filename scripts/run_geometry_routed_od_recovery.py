@@ -52,13 +52,22 @@ def route_recovery(init_bfov) -> tuple[bool, list[str]]:
 
 
 def route_direct_od(init_bfov) -> tuple[bool, list[str]]:
-    """Select a direct tangent OD expert for the validated tiny polar band."""
+    """Select a direct tangent OD expert for validated geometry bands.
+
+    The narrow compact and mid-large bands are retained as opt-in quality
+    experts.  Their local iGPU latency is recorded in the bake-off; a 5090
+    deployment must still repeat the end-to-end speed check.
+    """
     if init_bfov is None:
         return False, []
     fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
                    float(init_bfov[1]))
     if 6.0 <= fh < 7.0 and 10.0 <= fv < 15.0 and abs(lat) >= 60.0:
         return True, ["tiny_polar_direct_od_tangent"]
+    if 8.0 <= fh < 10.0 and 25.0 <= fv < 32.0 and abs(lat) < 20.0:
+        return True, ["compact_direct_od_tangent"]
+    if 20.5 <= fh < 23.0 and 45.0 <= fv < 50.0 and abs(lat) < 35.0:
+        return True, ["mid_large_direct_od_tangent"]
     return False, []
 
 

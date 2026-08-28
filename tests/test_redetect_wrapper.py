@@ -39,6 +39,9 @@ class RedetectWrapperTest(unittest.TestCase):
     def test_direct_od_gate_is_narrow_polar_geometry(self):
         self.assertTrue(route_direct_od((0.0, -66.0, 6.3, 12.0))[0])
         self.assertFalse(route_direct_od((0.0, -70.0, 9.2, 9.0))[0])
+        self.assertTrue(route_direct_od((0.0, 8.7, 9.2, 28.3))[0])
+        self.assertTrue(route_direct_od((0.0, -27.5, 21.0, 47.7))[0])
+        self.assertFalse(route_direct_od((0.0, 10.0, 20.5, 55.6))[0])
 
     def test_probe_preserves_polar_and_moderate_geometry(self):
         self.assertFalse(route_probe_b224((0.0, -70.0, 36.0, 44.0))[0])
