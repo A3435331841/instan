@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -35,6 +36,7 @@ from scripts.run_sutrack_b224_openvino_sequence import (  # noqa: E402
     MotionAdaptiveTracker,
     OpenVinoB224Tracker,
 )
+from panotrack.pipeline.risk_policy import LinearRiskPolicy  # noqa: E402
 
 
 def _base_filter(kwargs):
@@ -303,6 +305,152 @@ class ProbeRouter:
         return out
 
 
+def _set_external_update_block(obj, blocked: bool, seen=None):
+    """Propagate a one-frame presence decision through the active router.
+
+    Only tracker objects are traversed; compiled OpenVINO models and NumPy
+    arrays are intentionally not touched.  The flag is transient and is
+    cleared on the next low-risk frame, so it cannot silently become the
+    permanent ``updates_frozen`` state used by scale diagnostics.
+    """
+    if obj is None:
+        return
+    if seen is None:
+        seen = set()
+    ident = id(obj)
+    if ident in seen:
+        return
+    seen.add(ident)
+    if hasattr(obj, "external_update_block"):
+        obj.external_update_block = bool(blocked)
+    child_names = (
+        "active", "base", "high", "probe", "factor_probe", "geometry",
+        "noswitch", "t", "b_default", "b_adaptive", "b_noswitch",
+        "b_dynamic_polar", "b_fixed", "b_constant",
+    )
+    for name in child_names:
+        child = getattr(obj, name, None)
+        if child is not None and child is not obj:
+            _set_external_update_block(child, blocked, seen)
+
+
+class PresenceGatedTracker:
+    """Wrap a causal router with an offline-trained presence safety gate.
+
+    The gate scores the previous/current runtime signals before the next
+    template update.  It only blocks a potentially contaminating update and
+    annotates the trace; it never reads GT, sequence names, or a result table.
+    """
+
+    def __init__(self, router, policy: LinearRiskPolicy):
+        self.router = router
+        self.policy = policy
+        self.selected_method = "presence_pending"
+        self.route_reasons = ["presence_policy_enabled"]
+        self.width = self.height = None
+        self.init_bfov = None
+        self.q_history = []
+        self.prev_center = None
+        self.prev_area = None
+        self.last_risk = 0.0
+        self.last_blocked = False
+        self.last_features = None
+
+    def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
+        self.router.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        self.width = float(frame_rgb.shape[1])
+        self.height = float(frame_rgb.shape[0])
+        self.init_bfov = tuple(float(v) for v in init_bfov[:4]) if init_bfov is not None else None
+        self.q_history = []
+        self.prev_center = None
+        self.prev_area = None
+        self.last_risk = 0.0
+        self.last_blocked = False
+        self.last_features = None
+        _set_external_update_block(self.router, False)
+
+    def _features(self, out):
+        box = tuple(float(v) for v in out.get("target_bbox", (0, 0, 0, 0))[:4])
+        q = float(np.clip(out.get("quality", 0.5), 0.0, 1.0))
+        anchor = float(np.clip(out.get("anchor_similarity", 1.0), 0.0, 1.0))
+        cx = (box[0] + 0.5 * box[2]) % max(self.width, 1.0)
+        cy = (box[1] + 0.5 * box[3]) / max(self.height, 1.0)
+        area = max(box[2] * box[3], 1e-6)
+        if self.prev_center is None:
+            dx = dy = speed = darea = dq = 0.0
+        else:
+            dx = cx / self.width - self.prev_center[0]
+            if dx > 0.5:
+                dx -= 1.0
+            elif dx < -0.5:
+                dx += 1.0
+            dy = cy - self.prev_center[1]
+            speed = math.hypot(dx, dy)
+            darea = math.log(area / max(self.prev_area, 1e-6))
+            dq = q - self.q_history[-1]
+        self.prev_center = (cx / self.width, cy)
+        self.prev_area = area
+        self.q_history.append(q)
+        recent = np.asarray(self.q_history[-5:], dtype=float)
+        init = self.init_bfov or (0.0, 0.0, 90.0, 90.0)
+        status = str(out.get("status", "")).lower()
+        entropy = out.get("response_entropy")
+        try:
+            entropy = float(entropy)
+            entropy_missing = 0.0 if math.isfinite(entropy) else 1.0
+            if entropy_missing:
+                entropy = 0.0
+        except (TypeError, ValueError):
+            entropy, entropy_missing = 0.0, 1.0
+        return {
+            "quality": q, "quality_delta": dq,
+            "quality_mean5": float(np.mean(recent)),
+            "quality_std5": float(np.std(recent)),
+            "anchor_similarity": anchor, "response_entropy": entropy,
+            "entropy_missing": entropy_missing, "center_x": cx / self.width,
+            "center_y": cy, "width_norm": max(box[2], 0.0) / self.width,
+            "height_norm": max(box[3], 0.0) / self.height,
+            "log_area": math.log(area / max(self.width * self.height, 1.0)),
+            "motion_x": dx, "motion_y": dy, "motion_speed": speed,
+            "log_area_delta": darea, "fov_h_norm": float(init[2]) / 180.0,
+            "fov_v_norm": float(init[3]) / 180.0,
+            "latitude_norm": abs(float(init[1])) / 90.0,
+            "seam_distance": min(cx / self.width, 1.0 - cx / self.width),
+            "fallback_used": float(bool(out.get("fallback_used", False))),
+            "expert_probed": float(bool(out.get("expert_probed", False))),
+            "status_suspect": float(status == "suspect"),
+            "status_lost": float(status == "lost"),
+        }
+
+    def track(self, frame_rgb, **kwargs):
+        # ``last_risk`` was computed after the previous frame, hence this is
+        # causal and blocks the next template write only.
+        _set_external_update_block(self.router, self.last_blocked)
+        out = dict(self.router.track(frame_rgb, **kwargs))
+        features = self._features(out)
+        try:
+            risk = float(self.policy.score(features))
+            blocked = bool(risk >= float(self.policy.threshold))
+        except (KeyError, TypeError, ValueError):
+            # A mismatched policy must never break a normal tracker run.
+            risk, blocked = float("nan"), False
+        self.last_risk = risk
+        self.last_blocked = blocked
+        self.last_features = features
+        self.selected_method = getattr(self.router, "selected_method", "router")
+        self.route_reasons = list(getattr(self.router, "route_reasons", []))
+        if blocked:
+            self.route_reasons.append("presence_policy_probe")
+            if str(out.get("status", "normal")) == "normal":
+                out["status"] = "suspect"
+        out["presence_risk"] = risk
+        out["presence_probe"] = blocked
+        out["update_blocked_by_presence"] = bool(self.last_blocked)
+        out["route_reasons"] = list(self.route_reasons)
+        out["expert_used"] = self.selected_method
+        return out
+
+
 def route_probe_b224(init_bfov) -> tuple[bool, list[str]]:
     """Limit the dual probe to non-polar, non-large geometries.
 
@@ -348,6 +496,8 @@ def main(argv=None) -> int:
                           "is within this margin of factor-4; negative "
                           "values allow a small deficit when long-view "
                           "stability is better"))
+    ap.add_argument("--presence-policy", default=None,
+                    help="optional CPU-trained LinearRiskPolicy JSON; diagnostics/guard only until OOF promotion")
     args = ap.parse_args(argv)
     import openvino as ov
 
@@ -359,6 +509,7 @@ def main(argv=None) -> int:
     compile_seconds = time.perf_counter() - t0
     seqs = [s.strip().replace("\\", "/") for s in args.seqs.split(",") if s.strip()]
     out_root = Path(args.out).resolve(); out_root.mkdir(parents=True, exist_ok=True)
+    presence_policy = LinearRiskPolicy.load(Path(args.presence_policy).resolve()) if args.presence_policy else None
     kwargs = build_kwargs(args)
     rows = []
     for idx, seq in enumerate(seqs, 1):
@@ -369,6 +520,8 @@ def main(argv=None) -> int:
             tracker = ProbeRouter(b_model, b_high_model, t_model, kwargs,
                                   args.probe_frames, args.quality_margin,
                                   args.factor_quality_margin)
+            if presence_policy is not None:
+                tracker = PresenceGatedTracker(tracker, presence_policy)
             holder["tracker"] = tracker; return tracker
 
         try:
@@ -383,6 +536,7 @@ def main(argv=None) -> int:
                 "probe_frames": args.probe_frames,
                 "quality_margin": args.quality_margin,
                 "factor_quality_margin": args.factor_quality_margin,
+                "presence_policy": str(Path(args.presence_policy).resolve()) if args.presence_policy else None,
                 "e2e_fps": metrics.get("e2e_fps"),
             })
             np.savetxt(seq_out / "results_erp.txt", pred, fmt="%.6f", delimiter=",")

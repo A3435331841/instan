@@ -299,6 +299,11 @@ class OpenVinoB224Tracker:
         self.last_fallback_used = False
         self.last_motion_deg = 0.0
         self.last_quality = 1.0
+        # An optional causal presence gate can set this flag for the next
+        # frame.  It is deliberately external to the tracker state: a high
+        # risk score blocks only the template write for that frame and does
+        # not overwrite the learned ``updates_frozen`` safety latch.
+        self.external_update_block = False
         self.quality_low_run = 0
         self.state_status = "normal"
         side = self.search_size // 16
@@ -680,7 +685,8 @@ class OpenVinoB224Tracker:
         self.last_quality = conf
         self.frame_id += 1
         if (self.update_interval > 0 and self.frame_id % self.update_interval == 0 and
-                conf > self.update_threshold and not self.updates_frozen):
+                conf > self.update_threshold and not self.updates_frozen and
+                not self.external_update_block):
             z_patch, z_rf = self._sample(tiled, self.state, self.template_factor,
                                          self.template_size, template=True)
             candidate_template = preprocess(z_patch)
