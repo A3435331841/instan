@@ -125,6 +125,8 @@ def route_conservative_large_target(init_bfov) -> tuple[bool, list[str]]:
                    float(init_bfov[1]))
     if fh >= 150.0 and fv >= 160.0 and abs(lat) >= 45.0:
         return True, ["conservative_large_target_protocol_box"]
+    if abs(lat) >= 85.0 and fh < 5.0 and fv < 6.0:
+        return True, ["conservative_extreme_polar_protocol_box"]
     return False, []
 
 

@@ -94,6 +94,8 @@ def route_narrow_recovery(init_bfov) -> tuple[bool, list[str]]:
                    float(init_bfov[1]))
     if 100.0 <= fh <= 120.0 and 150.0 <= fv <= 160.0 and abs(lat) <= 35.0:
         return True, ["narrow_long_ebfov_redetect"]
+    if 70.0 <= fh < 76.0 and 135.0 <= fv < 145.0 and abs(lat) <= 35.0:
+        return True, ["narrow_seam_absence_redetect"]
     # Keep the near-equator hemispherical branch narrow: the nearby -4°
     # sequence is a different motion regime and has no validated rescue yet.
     if fh >= 175.0 and fv >= 175.0 and abs(lat) < 2.0:
