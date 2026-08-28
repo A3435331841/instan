@@ -4,9 +4,11 @@
 router for ordinary views and selects the B224 + sparse ODTrack tangent
 recovery wrapper for broad views (`fov_h >= 70°` or `fov_v >= 130°`) plus the
 validated high-latitude medium-view band (`30° <= fov_h <= 50°`,
-`65° <= fov_v <= 100°`, `abs(lat) >= 40°`).  The subsequent OD calls are
-runtime-state gated, with normal cadence 30 and LOST cadence 5.  No sequence
-name, GT, or offline score table is available to the router.
+`65° <= fov_v <= 100°`, `abs(lat) >= 40°`) and a pending high-latitude broad
+band (`60° <= fov_h < 80°`, `75° <= fov_v < 100°`, `abs(lat) >= 40°`).  The
+subsequent OD calls are runtime-state gated, with normal cadence 30 and LOST
+cadence 5.  No sequence name, GT, or offline score table is available to the
+router.
 
 Representative 450-frame integration check:
 

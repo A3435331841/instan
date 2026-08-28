@@ -45,6 +45,8 @@ def route_recovery(init_bfov) -> tuple[bool, list[str]]:
         return True, ["large_fov_sparse_od_recovery"]
     if 30.0 <= fh <= 50.0 and 65.0 <= fv <= 100.0 and abs(lat) >= 40.0:
         return True, ["high_lat_medium_sparse_od_recovery"]
+    if 60.0 <= fh < 80.0 and 75.0 <= fv < 100.0 and abs(lat) >= 40.0:
+        return True, ["high_lat_broad_sparse_od_recovery"]
     return False, ["geometry_b224_t224_router"]
 
 
