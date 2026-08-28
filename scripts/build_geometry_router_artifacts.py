@@ -80,6 +80,12 @@ def _summary(rows: list[dict], name: str) -> dict:
     def mean(key):
         vals = [float(r[key]) for r in rows if r.get(key) is not None and math.isfinite(float(r[key]))]
         return float(np.mean(vals)) if vals else None
+    fps_rows = [r for r in rows if r.get("candidate_e2e_fps") is not None and
+                r.get("n_frames") is not None and float(r["candidate_e2e_fps"]) > 0]
+    total_frames = sum(max(0.0, float(r["n_frames"]) - 1.0) for r in fps_rows)
+    total_seconds = sum(max(0.0, float(r["n_frames"]) - 1.0) /
+                        float(r["candidate_e2e_fps"]) for r in fps_rows)
+    weighted_fps = total_frames / total_seconds if total_seconds > 0 else None
     return {
         "schema": "grt360.geometry_router_summary.v1",
         "name": name,
@@ -87,6 +93,10 @@ def _summary(rows: list[dict], name: str) -> dict:
         "mean_auc": mean("candidate_auc"),
         "mean_sr": mean("candidate_sr"),
         "mean_e2e_fps": mean("candidate_e2e_fps"),
+        "weighted_e2e_fps": weighted_fps,
+        "max_e2e_latency_p95_ms": max((float(r.get("candidate_e2e_latency_p95_ms"))
+                                        for r in rows if r.get("candidate_e2e_latency_p95_ms") is not None),
+                                       default=None),
         "mean_baseline_auc": mean("baseline_auc"),
         "mean_baseline_sr": mean("baseline_sr"),
         "auc_delta": mean("auc_delta"),
@@ -132,6 +142,8 @@ def main(argv=None) -> int:
             "candidate_auc": c.get("auc") if c else None,
             "candidate_sr": c.get("sr") if c else None,
             "candidate_e2e_fps": c.get("e2e_fps") if c else None,
+            "candidate_e2e_latency_p50_ms": c.get("e2e_latency_p50_ms") if c else None,
+            "candidate_e2e_latency_p95_ms": c.get("e2e_latency_p95_ms") if c else None,
             "selected_method": c.get("selected_method") if c else None,
             "route_reasons": ";".join(c.get("route_reasons", [])) if c else None,
             "n_frames": c.get("n_frames") if c else None,
@@ -175,8 +187,12 @@ def main(argv=None) -> int:
     latency = {
         "schema": "grt360.latency_summary.v1",
         "mean_e2e_fps": full.get("mean_e2e_fps"),
+        "weighted_e2e_fps": full.get("weighted_e2e_fps"),
         "min_e2e_fps": min((float(r["candidate_e2e_fps"]) for r in rows if r["candidate_e2e_fps"] is not None), default=None),
-        "sequences": [{"sequence": r["sequence"], "e2e_fps": r["candidate_e2e_fps"]} for r in rows],
+        "max_e2e_latency_p95_ms": full.get("max_e2e_latency_p95_ms"),
+        "sequences": [{"sequence": r["sequence"], "e2e_fps": r["candidate_e2e_fps"],
+                       "e2e_latency_p50_ms": r.get("candidate_e2e_latency_p50_ms"),
+                       "e2e_latency_p95_ms": r.get("candidate_e2e_latency_p95_ms")} for r in rows],
     }
     (out / "latency_summary.json").write_text(json.dumps(latency, ensure_ascii=False, indent=2, allow_nan=True), encoding="utf-8")
     route = {
