@@ -149,6 +149,15 @@ class SphericalB224RedetectTracker:
         if self._anchor_similarity(frame, box) < self.anchor_min_similarity:
             return False
         if self.last_box is not None:
+            prev_area = max(1.0, float(self.last_box[2]) * float(self.last_box[3]))
+            cand_area = max(1.0, float(box[2]) * float(box[3]))
+            area_ratio = cand_area / prev_area
+            # Reject a recovery that changes scale by more than one order of
+            # magnitude in one step.  A broad FoV can legitimately shrink a
+            # lot, but a >3x expansion is the characteristic false recovery
+            # seen in the real/0010 tail.
+            if area_ratio < 0.01 or area_ratio > 3.0:
+                return False
             old_cx = box_center(self.last_box, self.width)
             new_cx = box_center(box, self.width)
             dx = circular_delta(new_cx, old_cx, self.width)
@@ -347,7 +356,7 @@ def main(argv=None) -> int:
     ap.add_argument("--run-len", type=int, default=5)
     ap.add_argument("--search-interval", type=int, default=10)
     ap.add_argument("--min-score", type=float, default=0.45)
-    ap.add_argument("--anchor-min-similarity", type=float, default=0.50)
+    ap.add_argument("--anchor-min-similarity", type=float, default=0.38)
     ap.add_argument("--max-motion-deg", type=float, default=120.0)
     ap.add_argument("--erp-downscale", type=int, default=3)
     ap.add_argument("--quality-threshold", type=float, default=0.40)

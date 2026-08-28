@@ -64,6 +64,39 @@ def route_noswitch_b224(init_bfov) -> tuple[bool, list[str]]:
     return False, []
 
 
+def route_fixed_b224(init_bfov) -> tuple[bool, list[str]]:
+    """Select the bare fixed-factor B224 contract in compact safe bands.
+
+    The fixed branch is deliberately narrower than the adaptive no-switch
+    route.  It is motivated by the completed bare-B224 sweep: in compact
+    non-polar views the adaptive factor/high-template machinery can change the
+    crop before the target has established a stable appearance.  The rule is
+    geometry-only and is kept separate so it can be evaluated and rolled back
+    without changing the existing baseline branches.
+    """
+    if init_bfov is None:
+        return False, []
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                   float(init_bfov[1]))
+    if abs(lat) >= 45.0:
+        return False, []
+    # Compact vertical views: the fixed crop was materially more stable than
+    # the adaptive high-template hand-off in the 11--13 x 10--16 band.
+    if 10.0 <= fh < 13.0 and 10.0 <= fv <= 16.0:
+        return True, ["b224_fixed_compact_vertical"]
+    # Very small, near-equatorial views: retain the ordinary factor-4 crop
+    # rather than the adaptive factor schedule.  The latitude guard avoids
+    # replacing the already validated polar protection.
+    if fh <= 6.0 and fv <= 8.0 and abs(lat) < 35.0:
+        return True, ["b224_fixed_tiny_nonpolar"]
+    # A narrow compact-scale band where the fixed crop avoids an early
+    # adaptive expansion.  Keep the latitude interval tight to limit the
+    # known regression around the neighbouring 5.6 x 16 view.
+    if 5.5 <= fh <= 6.0 and 18.0 <= fv <= 22.0 and abs(lat) < 10.0:
+        return True, ["b224_fixed_compact_scale"]
+    return False, []
+
+
 def route_adaptive_b224(init_bfov) -> tuple[bool, list[str]]:
     """Select adaptive B224 only for validated compact/moderate geometry."""
     if init_bfov is None:
@@ -117,6 +150,14 @@ class GeometryRoutedTracker:
             template_factor=float(kwargs.get("template_factor", 2.0)),
             update_interval=25, update_threshold=0.70,
             search_factor_mode="adaptive", **fast_kwargs)
+        # Bare factor-4 B224, with no geometry/fallback/template machinery.
+        # This is an explicit expert rather than an offline result lookup.
+        self.b_fixed = OpenVinoB224Tracker(
+            b_model, search_size=224, template_size=112,
+            search_factor=float(kwargs.get("search_factor", 4.0)),
+            template_factor=float(kwargs.get("template_factor", 2.0)),
+            update_interval=25, update_threshold=0.70,
+            search_factor_mode="fixed")
         # T224 IR has the same 224 search and 112 template tensor contract;
         # its own adaptive factor logic is retained, but no B high-template
         # model is called on this branch.
@@ -131,9 +172,15 @@ class GeometryRoutedTracker:
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
         use_t, reasons = route_t224(init_bfov)
+        use_fixed, fixed_reasons = route_fixed_b224(init_bfov)
         use_noswitch, noswitch_reasons = route_noswitch_b224(init_bfov)
         use_adaptive, adaptive_reasons = route_adaptive_b224(init_bfov)
-        if use_noswitch:
+        if use_fixed:
+            self.route_reasons = fixed_reasons
+            self.active = self.b_fixed
+            self.selected_method = "sutrack_b224_fixed"
+            self.b_fixed.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        elif use_noswitch:
             self.route_reasons = noswitch_reasons
             self.active = self.b_noswitch
             self.selected_method = "sutrack_b224_noswitch"

@@ -26,6 +26,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from scripts.eval_official import run_sequence  # noqa: E402
 from scripts.run_geometry_routed_b224_t224 import (  # noqa: E402
     GeometryRoutedTracker,
+    route_fixed_b224,
     route_noswitch_b224,
     route_t224,
     build_kwargs,
@@ -162,9 +163,15 @@ class ProbeRouter:
         self.route_reasons = []
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
+        use_fixed, fixed_reasons = route_fixed_b224(init_bfov)
         use_t, reasons = route_t224(init_bfov)
         use_noswitch, noswitch_reasons = route_noswitch_b224(init_bfov)
-        if use_noswitch:
+        if use_fixed:
+            self.active = self.geometry.b_fixed
+            self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+            self.selected_method = "sutrack_b224_fixed"
+            self.route_reasons = fixed_reasons
+        elif use_noswitch:
             self.active = self.noswitch
             self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
             self.selected_method = "sutrack_b224_noswitch"
