@@ -184,7 +184,6 @@ def main(argv=None) -> int:
         "runtime_features": ["init_bfov.fov_h", "init_bfov.fov_v", "init_bfov.lat"],
         "rules": [
             "fov_h<=6 and abs(lat)<85 and (fov_v<=12.5 or (5.8<=fov_h<=6 and 18<=fov_v<=23 and abs(lat)<30)) -> sutrack_t224",
-            "10<=fov_h<15 and abs(lat)<65 and (fov_v<=12.5 or fov_h>=14.5) -> sutrack_t224",
             "abs(lat)>=65 and 29<=fov_h<=32 and 25<=fov_v<=35 -> conservative sutrack_b224",
             "otherwise -> adaptive sutrack_b224 when moderate/high-latitude geometry gate passes",
             "recovery: fov_h>=70 or fov_v>=130 -> sparse OD tangent recovery",

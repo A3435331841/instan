@@ -43,9 +43,6 @@ def route_t224(init_bfov) -> tuple[bool, list[str]]:
     if fh <= 6.0 and abs(lat) < 85.0:
         if fv <= 12.5:
             return True, ["compact_fov_h_le_6", "safe_vertical_band", "non_extreme_pole"]
-    if 10.0 <= fh < 15.0 and abs(lat) < 65.0:
-        if fv <= 12.5 or fh >= 14.5:
-            return True, ["compact_fov_h_10_15", "safe_vertical_band", "non_polar"]
     return False, ["b224_geometry_default"]
 
 
