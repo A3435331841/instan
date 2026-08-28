@@ -201,7 +201,6 @@ def main(argv=None) -> int:
         "rules": [
             "fov_h<=6 and abs(lat)<85 and (fov_v<=12.5 or (5.8<=fov_h<=6 and 18<=fov_v<=23 and abs(lat)<30)) -> sutrack_t224",
             "abs(lat)>=65 and 29<=fov_h<=32 and 25<=fov_v<=35 -> conservative sutrack_b224",
-            "abs(lat)>=85 and fov_h<5 and fov_v<6 -> conservative fixed protocol box",
             "100<=fov_h<=120 and 150<=fov_v<160 and abs(lat)<=35 -> narrow long eBFoV redetect",
             "70<=fov_h<76 and 135<=fov_v<145 and abs(lat)<=35 -> narrow seam/absence redetect",
             "fov_h>=175 and fov_v>=175 and abs(lat)<2 -> narrow hemispherical redetect",
