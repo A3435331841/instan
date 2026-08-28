@@ -64,6 +64,12 @@ def route_direct_od(init_bfov) -> tuple[bool, list[str]]:
                    float(init_bfov[1]))
     if 6.0 <= fh < 7.0 and 10.0 <= fv < 15.0 and abs(lat) >= 60.0:
         return True, ["tiny_polar_direct_od_tangent"]
+    # A separate 9x9 high-latitude family is the only completed full-length
+    # tiny-polar case where the tangent OD expert beats B224 materially.  Keep
+    # its geometry envelope narrow; nearby 4--8° targets have validated T/B
+    # routes and must not inherit the ~20 FPS OD path blindly.
+    if 8.5 <= fh < 10.0 and 8.0 <= fv < 10.5 and 65.0 <= abs(lat) < 75.0:
+        return True, ["tiny_polar_9deg_direct_od_tangent"]
     if 8.0 <= fh < 10.0 and 25.0 <= fv < 32.0 and abs(lat) < 20.0:
         return True, ["compact_direct_od_tangent"]
     if 20.5 <= fh < 23.0 and 45.0 <= fv < 50.0 and abs(lat) < 35.0:
@@ -128,6 +134,16 @@ class GeometryRecoveryTracker:
             update_interval=25, update_threshold=0.55,
             seam_recenter=True, first_compiled_model=od_first_model,
             projection_mode="tangent") if od_model is not None else None)
+        # The tiny-polar direct band was measured with the native ERP OD
+        # graph: it is both faster and marginally more accurate than tangent
+        # remapping on this geometry.  Keep both protocol variants compiled
+        # once and choose between them from the causal init-BFoV rule.
+        self.od_direct_erp = (OpenVinoODTrackTracker(
+            od_model, search_size=384, template_size=192,
+            search_factor=5.0, template_factor=2.0,
+            update_interval=25, update_threshold=0.55,
+            seam_recenter=True, first_compiled_model=od_first_model,
+            projection_mode="erp") if od_model is not None else None)
         self.active = self.geometry
         self.selected_method = "geometry_b224_t224"
         self.route_reasons = []
@@ -139,8 +155,9 @@ class GeometryRecoveryTracker:
         else:
             use_recovery, reasons = route_recovery(init_bfov)
         if use_direct and self.od_direct is not None:
-            self.active = self.od_direct
-            self.selected_method = "odtrack_tangent_direct"
+            use_erp = any("tiny_polar" in reason for reason in direct_reasons)
+            self.active = self.od_direct_erp if use_erp else self.od_direct
+            self.selected_method = "odtrack_erp_direct" if use_erp else "odtrack_tangent_direct"
             self.route_reasons = direct_reasons
         elif use_recovery and self.recovery is not None:
             self.active = self.recovery
