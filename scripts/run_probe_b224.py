@@ -505,6 +505,11 @@ def route_probe_b224(init_bfov) -> tuple[bool, list[str]]:
         return False, ["probe_preserve_polar_geometry"]
     if fh >= 70.0 or fv >= 100.0:
         return False, ["probe_preserve_large_geometry"]
+    # The 28x84° tall-compact regime is sensitive to the bare/adaptive probe:
+    # its warm-up branch can silently choose the bare model and lose a long
+    # valid segment.  Keep it on the geometry-routed B224 path instead.
+    if 25.0 <= fh < 30.0 and fv >= 70.0:
+        return False, ["probe_preserve_tall_compact_geometry"]
     if fh < 15.0 and fv >= 27.0:
         return False, ["probe_preserve_tall_compact_geometry"]
     if 30.0 <= fh <= 60.0 and fv >= 70.0:

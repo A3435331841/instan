@@ -60,6 +60,7 @@ class RedetectWrapperTest(unittest.TestCase):
         self.assertFalse(route_probe_b224((0.0, 0.0, 27.0, 58.0))[0])
         self.assertFalse(route_probe_b224((0.0, 8.7, 9.2, 28.3))[0])
         self.assertFalse(route_probe_b224((0.0, -18.8, 45.6, 90.4))[0])
+        self.assertFalse(route_probe_b224((0.0, -27.5, 28.0, 83.9))[0])
         self.assertTrue(route_probe_b224((0.0, 0.0, 22.0, 56.0))[0])
 
     def test_factor_probe_is_limited_to_nonpolar_large_views(self):
