@@ -149,6 +149,21 @@ class SphericalB224RedetectTracker:
         if self._anchor_similarity(frame, box) < self.anchor_min_similarity:
             return False
         if self.last_box is not None:
+            # A wide-FoV target can move quickly, but a recovery that jumps
+            # from a polar state to the equator is almost always a background
+            # peak.  The old gate checked only longitudinal motion, allowing
+            # an OD candidate from the opposite hemisphere to corrupt B224.
+            # This remains a causal geometry check; it uses no GT or sequence
+            # identity.
+            last_cy = float(self.last_box[1]) + 0.5 * float(self.last_box[3])
+            cand_cy = float(box[1]) + 0.5 * float(box[3])
+            last_lat = 90.0 - last_cy / max(1.0, float(self.height)) * 180.0
+            cand_lat = 90.0 - cand_cy / max(1.0, float(self.height)) * 180.0
+            if abs(last_lat) >= 55.0 and abs(cand_lat) < 30.0:
+                return False
+            if abs(last_lat) >= 45.0 and abs(cand_lat) >= 30.0:
+                if last_lat * cand_lat < 0.0:
+                    return False
             prev_area = max(1.0, float(self.last_box[2]) * float(self.last_box[3]))
             cand_area = max(1.0, float(box[2]) * float(box[3]))
             area_ratio = cand_area / prev_area
