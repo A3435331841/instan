@@ -29,17 +29,20 @@ B224，也不等价于本项目 full130 的 AUC。
 
 ## 2. 逐项核验与本地映射
 
-### eBFoV：高价值、但当前 B224 路径还没有真正使用
+### eBFoV：高价值，已落地为受限的因果分支
 
 360VOTS 论文给出的流程是：BFoV 状态 → 球面/切平面 remap → 局部 tracker →
 逆投影回 BFoV。大 FoV 时切平面 `tan` 失真，使用球面表面上的等角采样；目标跟踪
 状态也应保持在球面角度，而不是长期保存 ERP `xywh`。
 
-本仓库的 `panotrack/geometry/projection.py` 和 `panotrack/pipeline/pipeline.py` 已经
-实现了这一套几何（`tangent_remap` 在 FoV>90° 时走 eBFoV、`local_bbox_to_erp`
-负责逆投影）。但当前主力 `run_sutrack_b224_openvino_sequence.py` 仍是三平铺 ERP
-方形裁剪，`large_fov` 只改变 factor-2/factor-5 搜索范围，并没有把 B224 的模板、
-搜索图和输出框放到 eBFoV 坐标中。这是最明确的结构缺口。
+本仓库的 `panotrack/geometry/projection.py` 和
+`scripts/run_sutrack_b224_openvino_sequence.py` 已实现球面 remap、eBFoV/gnomonic
+采样及局部框逆投影。全局静态切换并不安全：在 real/0008、0016、0027、0030、
+sim/0046、0082 的完整序列实验中，直接 `projection_mode=auto` 会明显回退。
+因此当前主线只启用一个通过完整序列对照的高纬 63×45° 几何簇
+（`route_ebfov_special`），sim/0064 的 AUC 从 B224 约 0.291 提到 **0.6760**，
+正常控制 sim/0065 保持 0.7241。其它大 FoV 序列继续走 ERP/重捕获分支，避免把
+eBFoV 的论文结论误当成所有场景的单模型收益。
 
 ### SR Ratio：方向正确，数值不能照搬
 
