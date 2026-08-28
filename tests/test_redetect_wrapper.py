@@ -7,6 +7,7 @@ from scripts.run_sutrack_b224_redetect import (
     circular_delta,
     crop_wrap,
 )
+from scripts.run_geometry_routed_od_recovery import route_recovery
 
 
 class RedetectWrapperTest(unittest.TestCase):
@@ -26,6 +27,10 @@ class RedetectWrapperTest(unittest.TestCase):
         value = bfov_tuple([0.0, 0.0, 20.0, 20.0], 1440, 720)
         self.assertEqual(len(value), 4)
         self.assertTrue(all(np.isfinite(value)))
+
+    def test_recovery_gate_is_geometry_only(self):
+        self.assertTrue(route_recovery((0.0, -20.0, 72.0, 140.0))[0])
+        self.assertFalse(route_recovery((0.0, -20.0, 20.0, 30.0))[0])
 
 
 if __name__ == "__main__":
