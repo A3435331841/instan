@@ -27,6 +27,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 from scripts.eval_official import run_sequence  # noqa: E402
 from scripts.run_geometry_routed_b224_t224 import (  # noqa: E402
     GeometryRoutedTracker,
+    route_conservative_large_target,
     route_fixed_b224,
     route_noswitch_b224,
     route_t224,
@@ -257,10 +258,16 @@ class ProbeRouter:
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
         use_factor, factor_reasons = route_factor_probe(init_bfov)
+        use_constant, constant_reasons = route_conservative_large_target(init_bfov)
         use_fixed, fixed_reasons = route_fixed_b224(init_bfov)
         use_t, reasons = route_t224(init_bfov)
         use_noswitch, noswitch_reasons = route_noswitch_b224(init_bfov)
-        if use_fixed:
+        if use_constant:
+            self.active = self.geometry.b_constant
+            self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+            self.selected_method = "constant_bfov_protocol"
+            self.route_reasons = constant_reasons
+        elif use_fixed:
             self.active = self.geometry.b_fixed
             self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
             self.selected_method = "sutrack_b224_fixed"
