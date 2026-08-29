@@ -240,11 +240,16 @@ def main(argv: list[str] | None = None) -> int:
     exit_root = storage / "experiments" / "server_exit_20260827"
     weights = exit_root / "weights"
     checkpoints = exit_root / "checkpoints"
-    v5_checkpoint = _find_one(checkpoints, "ODTrack_ep0006.pth.tar")
+    v5_candidates = sorted(checkpoints.rglob("finetune_spherical_v5/ODTrack_ep0006.pth.tar"))
+    if len(v5_candidates) != 1:
+        raise RuntimeError(f"expected exactly one v5 ep0006 checkpoint, found {len(v5_candidates)}")
+    v5_checkpoint = v5_candidates[0]
     lora_checkpoint = _find_one(checkpoints, "sutrack_lora_ep0005.pth")
     b_weight = weights / "SUTRACK_b224_ep0180.pth.tar"
     t_weight = weights / "SUTRACK_t224_ep0180.pth.tar"
-    base_od = _find_one(repo / "artifacts", "ODTrack_ep0300.pth.tar")
+    base_od = repo / "artifacts" / "server_snapshot" / "weights" / "ODTrack_ep0300.pth.tar"
+    if not base_od.is_file():
+        raise FileNotFoundError(base_od)
     sutrack_src = _find_one(exit_root / "upstream_sources" / "sutrack", "README.md").parent
     # The source tree is normally the only child; resolve it if README lived
     # one level above the actual checkout.
