@@ -22,6 +22,20 @@ class OrtPort:
     shape: tuple[int, ...]
 
 
+class OrtResult(dict):
+    """Dictionary accepting both output names and OpenVINO-style ports."""
+
+    def __getitem__(self, key: Any) -> np.ndarray:
+        if isinstance(key, OrtPort):
+            key = key.any_name
+        return super().__getitem__(key)
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        if isinstance(key, OrtPort):
+            key = key.any_name
+        return super().get(key, default)
+
+
 def _shape(meta: Any) -> tuple[int, ...]:
     values: list[int] = []
     for value in meta.shape:
@@ -76,7 +90,7 @@ class OrtCompiledModel:
     def __call__(self, inputs: Mapping[str, np.ndarray]) -> dict[str, np.ndarray]:
         feed = {str(name): np.asarray(value) for name, value in inputs.items()}
         values = self.session.run(self._output_names, feed)
-        return dict(zip(self._output_names, values))
+        return OrtResult(zip(self._output_names, values))
 
 
 def required_model_paths(model_root: str | Path) -> dict[str, Path]:
