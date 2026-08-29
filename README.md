@@ -1,6 +1,6 @@
 # panotrack —— 影石全景视频智能跟踪赛道 · 360° ERP 实时单目标跟踪原型
 
-> **交付状态（2026-08-29）**：源码已冻结在 `a7ac8bc`，当前主交付为 **v5_final ORT CUDA** 几何路由。
+> **交付状态（2026-08-29）**：源码已冻结在 `delivery-v20260829`，当前主交付为 **v5_final ORT CUDA** 几何路由。
 > full130 AUC 0.7008 / SR 0.8536 / weighted e2e 36.22 FPS；valid35 AUC 0.6945 / SR 0.8411。
 > GitHub 只保存源码、配置、文档和小型清单；权重、图和历史结果位于本地 `grt360_deliverables\team_v5_20260829` 交接包。
 > 不执行未经确认的比赛仓库 docker push。完整构建与恢复步骤见 `docs/REPRODUCE_V5.md`、`docs/BUILD_ARENA_CUDA128.md`。

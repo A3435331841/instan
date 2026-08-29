@@ -2,7 +2,7 @@
   "schema": "grt360.repro_profile.v1",
   "name": "v5_final",
   "description": "Final B224 geometry route with causal conflict probe, sparse base OD and trained v5 OD direct experts.",
-  "git_ref": "a7ac8bc",
+  "git_ref": "delivery-v20260829",
   "backend": "ort_cuda",
   "models": {
     "sutrack_b224": "SUTRACK_b224_ep0180.pth.tar",
