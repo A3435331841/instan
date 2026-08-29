@@ -1,6 +1,6 @@
 {
   "schema": "grt360.final_delivery_assets.v1",
-  "source_ref": "delivery-v20260829",
+  "source_ref": "delivery-v20260829-r2",
   "github_contains": ["source", "configs", "docs", "small_manifests", "docker_build_definitions"],
   "github_excludes": ["datasets", "weights", "checkpoints", "onnx", "openvino", "run_traces"],
   "local_delivery_root": "D:\\instan\\grt360_deliverables\\team_v5_20260829",

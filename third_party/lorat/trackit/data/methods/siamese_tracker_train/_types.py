@@ -1,0 +1,23 @@
+from __future__ import annotations
+import numpy as np
+from dataclasses import dataclass
+from typing import Callable
+from trackit.data.source import TrackingDataset_Sequence, TrackingDataset_Track, TrackingDataset_FrameInTrack, TrackingDataset
+
+
+@dataclass(frozen=True)
+class SOTFrameInfo:
+    image: Callable[[], np.ndarray]
+    object_bbox: np.ndarray
+    object_exists: bool
+    dataset: TrackingDataset
+    sequence: TrackingDataset_Sequence
+    track: TrackingDataset_Track
+    frame: TrackingDataset_FrameInTrack
+
+
+@dataclass(frozen=True)
+class SiameseTrainingPair:
+    is_positive: bool
+    template: SOTFrameInfo
+    search: SOTFrameInfo

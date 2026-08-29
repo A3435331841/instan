@@ -1,0 +1,3 @@
+on_shared_file_system: false
+use_safetensors: true
+TIMM_USE_OLD_CACHE: true

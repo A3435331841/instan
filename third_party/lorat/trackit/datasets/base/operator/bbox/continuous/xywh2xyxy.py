@@ -1,0 +1,3 @@
+from __future__ import annotations
+def bbox_xywh2xyxy(bbox):
+    return (bbox[0], bbox[1], bbox[2] + bbox[0], bbox[3] + bbox[1])
