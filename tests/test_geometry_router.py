@@ -6,6 +6,7 @@ from scripts.run_geometry_routed_b224_t224 import (
     route_conservative_large_target,
     route_fixed_b224,
     route_noswitch_b224,
+    route_scale_freeze_b224,
     route_t224,
 )
 
@@ -13,6 +14,11 @@ from scripts.run_geometry_routed_b224_t224 import (
 class GeometryRouterTest(unittest.TestCase):
     def test_compact_nonpolar_uses_fast_expert(self):
         self.assertEqual(route_t224((0.0, 10.0, 5.0, 5.0))[0], True)
+
+    def test_mid_polar_vertical_band_prefers_precision_b224(self):
+        self.assertEqual(route_t224((0.0, -51.0, 4.6, 10.0))[0], False)
+        self.assertIn("compact_polar_b224_precision_guard",
+                      route_t224((0.0, -51.0, 4.6, 10.0))[1])
 
     def test_medium_narrow_band_uses_b224_exploration(self):
         self.assertEqual(route_t224((0.0, 10.0, 12.0, 12.0))[0], False)
@@ -50,8 +56,21 @@ class GeometryRouterTest(unittest.TestCase):
         self.assertEqual(route_fixed_b224((0.0, 16.4, 5.6, 16.0))[0], True)
         self.assertEqual(route_fixed_b224((0.0, -49.0, 2.5, 4.8))[0], False)
 
+    def test_fixed_scale_envelopes_are_causal(self):
+        self.assertEqual(route_fixed_b224((0.0, -22.9, 10.1, 27.8))[0], True)
+        self.assertEqual(route_fixed_b224((0.0, -35.2, 37.3, 82.6))[0], True)
+        self.assertEqual(route_fixed_b224((0.0, -78.4, 25.5, 23.3))[0], True)
+
     def test_tiny_nonpolar_uses_no_switch_b224(self):
         self.assertEqual(route_noswitch_b224((0.0, -49.0, 2.5, 4.8))[0], True)
+
+    def test_high_lat_compact_no_switch_is_narrow(self):
+        self.assertEqual(route_noswitch_b224((0.0, -72.9, 15.8, 27.6))[0], True)
+        self.assertEqual(route_noswitch_b224((0.0, -36.9, 5.0, 4.1))[0], False)
+
+    def test_wide_moderate_scale_freeze_gate(self):
+        self.assertEqual(route_scale_freeze_b224((0.0, -25.4, 77.2, 54.1))[0], True)
+        self.assertEqual(route_scale_freeze_b224((0.0, -38.8, 46.3, 60.4))[0], False)
 
     def test_high_lat_compact_vertical_view_keeps_existing_route(self):
         self.assertEqual(route_noswitch_b224((0.0, -55.0, 11.6, 14.8))[0], False)

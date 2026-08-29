@@ -9,6 +9,7 @@ from scripts.run_sutrack_b224_redetect import (
 )
 from scripts.run_geometry_routed_od_recovery import (
     route_direct_od,
+    route_direct_od_v5,
     route_narrow_recovery,
     route_recovery,
 )
@@ -47,6 +48,12 @@ class RedetectWrapperTest(unittest.TestCase):
         self.assertTrue(route_direct_od((0.0, -27.5, 21.0, 47.7))[0])
         self.assertTrue(route_direct_od((0.0, -56.0, 37.3, 72.8))[0])
         self.assertFalse(route_direct_od((0.0, 10.0, 20.5, 55.6))[0])
+
+    def test_v5_od_gate_is_narrow_and_causal(self):
+        self.assertTrue(route_direct_od_v5((0.0, -86.8, 24.7, 30.2))[0])
+        self.assertTrue(route_direct_od_v5((0.0, -87.8, 4.1, 4.9))[0])
+        self.assertTrue(route_direct_od_v5((0.0, -18.8, 45.6, 90.4))[0])
+        self.assertFalse(route_direct_od_v5((0.0, -50.0, 24.7, 30.2))[0])
 
     def test_narrow_recovery_uses_only_validated_geometry_families(self):
         self.assertTrue(route_narrow_recovery((0.0, -12.3, 114.5, 154.3))[0])

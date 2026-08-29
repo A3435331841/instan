@@ -6,8 +6,8 @@ FROM panotrack:latest
 
 LABEL org.opencontainers.image.title="GRT-360 最终中文离线镜像"
 LABEL org.opencontainers.image.source="https://github.com/A3435331841/instan"
-LABEL grt360.best_accuracy="ODTrack ERP 三平铺 AUC=0.5792135073 SR=0.6531941586"
-LABEL grt360.balanced="GRT360-Causal-DTP-ERP 保守路由，与教师基线持平"
+LABEL grt360.best_accuracy="SUTrack-B224 geometry/v5-OD routed AUC=0.7007805295 SR=0.8535501637"
+LABEL grt360.balanced="SUTrack-B224 geometry-routed v5-OD expert with causal recovery"
 LABEL grt360.offline="true"
 
 WORKDIR /app

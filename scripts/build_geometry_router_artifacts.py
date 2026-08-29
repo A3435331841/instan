@@ -196,10 +196,14 @@ def main(argv=None) -> int:
     }
     (out / "latency_summary.json").write_text(json.dumps(latency, ensure_ascii=False, indent=2, allow_nan=True), encoding="utf-8")
     route = {
-        "schema": "grt360.route_policy.v1", "status": "diagnostic_until_valid_locked",
+        "schema": "grt360.route_policy.v1", "status": "candidate_locked_metrics_pass_pending_docker",
         "runtime_features": ["init_bfov.fov_h", "init_bfov.fov_v", "init_bfov.lat"],
         "rules": [
+            "v5 expert: 20<=fov_h<30 and 25<=fov_v<35 and 80<=abs(lat)<90 -> trained ODTrack-v5 tangent",
+            "v5 expert: fov_h<6 and fov_v<6 and abs(lat)>=85 -> trained ODTrack-v5 tangent",
+            "v5 expert: 40<=fov_h<50 and 80<=fov_v<100 and abs(lat)<45 -> trained ODTrack-v5 tangent",
             "fov_h<=6 and abs(lat)<85 and (fov_v<=12.5 or (5.8<=fov_h<=6 and 18<=fov_v<=23 and abs(lat)<30)) -> sutrack_t224",
+            "compact polar precision guard: fov_h<=6 and 8<=fov_v<=12.5 and abs(lat)>=45 -> B224 precision path",
             "abs(lat)>=65 and 29<=fov_h<=32 and 25<=fov_v<=35 -> conservative sutrack_b224",
             "100<=fov_h<=120 and 150<=fov_v<160 and abs(lat)<=35 -> narrow long eBFoV redetect",
             "70<=fov_h<76 and 135<=fov_v<145 and abs(lat)<=35 -> narrow seam/absence redetect",
@@ -212,11 +216,18 @@ def main(argv=None) -> int:
             "direct expert: 6<=fov_h<7 and 10<=fov_v<15 and abs(lat)>=60 -> OD tangent",
             "direct expert: 8.5<=fov_h<10 and 8<=fov_v<10.5 and 65<=abs(lat)<69.9 -> OD tangent",
             "direct expert: 35<=fov_h<40 and 70<=fov_v<76 and 50<=abs(lat)<60 -> OD tangent",
+            "direct expert: 36<=fov_h<40 and 40<=fov_v<48 and 80<=abs(lat)<90 -> OD tangent",
             "55<=fov_h<70 and 40<=fov_v<50 and 45<=abs(lat)<65 -> B224 auto-eBFoV",
-            "fov_h<=6 and abs(lat)<65 and fov_v<=8 -> B224 without high-template switch",
+            "60<=fov_h<90 and 25<=fov_v<70 and abs(lat)<45 -> B224 early 0.10 scale-freeze gate",
+            "fov_h<16 and 25<=fov_v<70 and abs(lat)<45 -> fixed factor-4 B224",
+            "25<=fov_h<45 and ((25<=fov_v<35) or (70<=fov_v<90)) and abs(lat)<45 -> fixed factor-4 B224",
+            "65<=abs(lat)<85 and 25<=fov_h<30 and 20<=fov_v<30 -> fixed factor-4 B224 polar compact",
+            "fov_h<=6 and abs(lat)<65 and fov_v<=8 -> B224 without high-template switch (only when fixed overlap is absent)",
+            "65<=abs(lat)<80 and 15<=fov_h<25 and 23.5<=fov_v<30 -> clean adaptive B224 without high-template switch",
+            "5.5<=fov_h<=6 and 14<=fov_v<=22 and abs(lat)<30 -> six-frame fixed-vs-no-switch causal probe",
             "25<=fov_h<30 and fov_v>=70 -> preserve geometry-routed B224 (no early probe)",
-            "5.5<=fov_h<=6 and 14<=fov_v<=22 and abs(lat)<30 -> B224 without high-template switch",
             "10<=fov_h<13 and 10<=fov_v<=12.5 and abs(lat)<45 -> B224 without high-template switch",
+            "fixed/no-switch overlap -> six-frame quality plus area-runaway tie-breaker",
         ],
         "forbidden": ["sequence_name", "ground_truth", "offline_result_lookup"],
         "candidate": full,
@@ -229,7 +240,14 @@ def main(argv=None) -> int:
         "created_at": datetime.now(timezone.utc).isoformat(), "git_head": git_head,
         "baseline_root": str(Path(args.baseline).resolve()), "candidate_root": str(Path(args.candidate).resolve()),
         "n_sequences": len(rows), "full130": full, "valid35": valid,
-        "weights": {"b_xml_sha256": _sha256(PROJECT_ROOT.parent / "grt360_scratch" / "openvino" / "sutrack_b224.xml"), "t_xml_sha256": _sha256(PROJECT_ROOT.parent / "grt360_scratch" / "openvino" / "sutrack_t224_s224_t112.xml")},
+        "weights": {
+            "b_xml_sha256": _sha256(PROJECT_ROOT.parent / "grt360_scratch" / "openvino" / "sutrack_b224.xml"),
+            "t_xml_sha256": _sha256(PROJECT_ROOT.parent / "grt360_scratch" / "openvino" / "sutrack_t224_s224_t112.xml"),
+            "od_xml_sha256": _sha256(PROJECT_ROOT.parent / "grt360_scratch" / "openvino" / "odtrack_state.xml"),
+            "od_first_xml_sha256": _sha256(PROJECT_ROOT.parent / "grt360_scratch" / "openvino" / "odtrack_first.xml"),
+            "od_v5_xml_sha256": _sha256(PROJECT_ROOT.parent / "grt360_scratch" / "openvino" / "odtrack_v5_ep6_state.xml"),
+            "od_v5_first_xml_sha256": _sha256(PROJECT_ROOT.parent / "grt360_scratch" / "openvino" / "odtrack_v5_ep6_first.xml"),
+        },
         "safety": {"docker_push": False, "delete_files": False, "gt_routing": False},
     }
     (out / "autonomous_run_manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=True), encoding="utf-8")

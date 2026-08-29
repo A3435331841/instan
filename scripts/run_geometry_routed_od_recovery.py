@@ -76,6 +76,33 @@ def route_direct_od(init_bfov) -> tuple[bool, list[str]]:
         return True, ["mid_large_direct_od_tangent"]
     if 35.0 <= fh < 40.0 and 70.0 <= fv < 76.0 and 50.0 <= abs(lat) < 60.0:
         return True, ["high_lat_medium_direct_od_tangent"]
+    # One additional high-pole family has a verified full-length OD tangent
+    # rescue.  It is intentionally narrow (36--40 x 40--48 degrees,
+    # |latitude|>=80) because neighbouring polar views regress on OD and the
+    # expert is substantially slower than B224.
+    if 36.0 <= fh < 40.0 and 40.0 <= fv < 48.0 and 80.0 <= abs(lat) < 90.0:
+        return True, ["high_lat_polar_medium_direct_od_tangent"]
+    return False, []
+
+
+def route_direct_od_v5(init_bfov) -> tuple[bool, list[str]]:
+    """Select the trained v5 OD expert for three validated failure bands.
+
+    The v5 state graph is materially more accurate on these geometries than
+    the B224 backbone, but it is too slow for the normal path.  The gates are
+    expressed only in protocol-init BFoV geometry and intentionally stay
+    narrow; callers must provide the optional v5 graphs explicitly.
+    """
+    if init_bfov is None:
+        return False, []
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                   float(init_bfov[1]))
+    if 20.0 <= fh < 30.0 and 25.0 <= fv < 35.0 and 80.0 <= abs(lat) < 90.0:
+        return True, ["v5_od_high_polar_scale"]
+    if fh < 6.0 and fv < 6.0 and abs(lat) >= 85.0:
+        return True, ["v5_od_extreme_tiny_polar"]
+    if 40.0 <= fh < 50.0 and 80.0 <= fv < 100.0 and abs(lat) < 45.0:
+        return True, ["v5_od_large_scale_motion"]
     return False, []
 
 
@@ -110,6 +137,7 @@ def route_narrow_recovery(init_bfov) -> tuple[bool, list[str]]:
 class GeometryRecoveryTracker:
     def __init__(self, b_model, b_high_model, t_model, od_model,
                  od_first_model, tracker_kwargs, args, enable_recovery=True,
+                 od_v5_model=None, od_v5_first_model=None,
                  narrow_recovery_only=False):
         # Keep the latest causal B224 probe/fixed/polar policy on the normal
         # path; direct OD remains an explicitly geometry-gated exception.
@@ -148,18 +176,29 @@ class GeometryRecoveryTracker:
             update_interval=25, update_threshold=0.55,
             seam_recenter=True, first_compiled_model=od_first_model,
             projection_mode="erp") if od_model is not None else None)
+        self.od_v5_direct = (OpenVinoODTrackTracker(
+            od_v5_model, search_size=384, template_size=192,
+            search_factor=5.0, template_factor=2.0,
+            update_interval=25, update_threshold=0.55,
+            seam_recenter=True, first_compiled_model=od_v5_first_model,
+            projection_mode="tangent") if od_v5_model is not None else None)
         self.active = self.geometry
         self.selected_method = "geometry_b224_t224"
         self.route_reasons = []
         self.narrow_recovery_only = bool(narrow_recovery_only)
 
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
+        use_v5, v5_reasons = route_direct_od_v5(init_bfov)
         use_direct, direct_reasons = route_direct_od(init_bfov)
         if self.narrow_recovery_only:
             use_recovery, reasons = route_narrow_recovery(init_bfov)
         else:
             use_recovery, reasons = route_recovery(init_bfov)
-        if use_direct and self.od_direct is not None:
+        if use_v5 and self.od_v5_direct is not None:
+            self.active = self.od_v5_direct
+            self.selected_method = "odtrack_v5_tangent_direct"
+            self.route_reasons = v5_reasons
+        elif use_direct and self.od_direct is not None:
             use_erp = any("tiny_polar_direct_od_tangent" in reason for reason in direct_reasons)
             self.active = self.od_direct_erp if use_erp else self.od_direct
             self.selected_method = "odtrack_erp_direct" if use_erp else "odtrack_tangent_direct"
@@ -173,12 +212,22 @@ class GeometryRecoveryTracker:
             self.selected_method = "geometry_b224_t224"
             self.route_reasons = reasons
         self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        if self.active is self.geometry:
+            # Preserve the inner geometry decision in the public trace and
+            # per-sequence manifest; otherwise the wrapper would expose an
+            # empty reason list even though the causal router selected a
+            # concrete B224/T224/probe branch.
+            self.route_reasons = (list(self.route_reasons) +
+                                  list(self.geometry.route_reasons))
 
     def track(self, frame_rgb, **kwargs):
         if self.active is self.geometry:
             self.selected_method = self.geometry.selected_method
         out = dict(self.active.track(frame_rgb, **kwargs))
-        out["expert_used"] = out.get("expert_used", self.selected_method)
+        if self.active is self.od_v5_direct:
+            out["expert_used"] = self.selected_method
+        else:
+            out["expert_used"] = out.get("expert_used", self.selected_method)
         out["route_reasons"] = list(self.route_reasons)
         return out
 
@@ -190,6 +239,10 @@ def main(argv=None) -> int:
     ap.add_argument("--t-xml", required=True)
     ap.add_argument("--od-xml", default=None)
     ap.add_argument("--od-first-xml", default=None)
+    ap.add_argument("--od-v5-xml", default=None,
+                    help="optional trained v5 ODTrack state graph for narrow hard bands")
+    ap.add_argument("--od-v5-first-xml", default=None,
+                    help="optional trained v5 ODTrack first-step graph")
     ap.add_argument("--data", required=True)
     ap.add_argument("--seqs", required=True)
     ap.add_argument("--out", required=True)
@@ -222,6 +275,10 @@ def main(argv=None) -> int:
                 if args.od_xml else None)
     od_first_model = (core.compile_model(str(Path(args.od_first_xml).resolve()), args.device)
                       if args.od_first_xml else None)
+    od_v5_model = (core.compile_model(str(Path(args.od_v5_xml).resolve()), args.device)
+                   if args.od_v5_xml else None)
+    od_v5_first_model = (core.compile_model(str(Path(args.od_v5_first_xml).resolve()), args.device)
+                         if args.od_v5_first_xml else None)
     compile_seconds = time.perf_counter() - t0
     seqs = [s.strip().replace("\\", "/") for s in args.seqs.split(",") if s.strip()]
     out_root = Path(args.out).resolve()
@@ -237,6 +294,7 @@ def main(argv=None) -> int:
             tracker = GeometryRecoveryTracker(
                 b_model, b_high_model, t_model, od_model, od_first_model,
                 tracker_kwargs, args, enable_recovery=not args.direct_only,
+                od_v5_model=od_v5_model, od_v5_first_model=od_v5_first_model,
                 narrow_recovery_only=args.narrow_recovery_only)
             holder["tracker"] = tracker
             return tracker
@@ -254,7 +312,8 @@ def main(argv=None) -> int:
                 "od_calls": (tracker.recovery.od_calls
                               if tracker.recovery is not None else 0),
                 "od_selected": (tracker.recovery.od_selected
-                                 if tracker.recovery is not None else 0),
+                              if tracker.recovery is not None else 0),
+                "od_v5_selected": int(tracker.selected_method == "odtrack_v5_tangent_direct"),
                 "narrow_recovery_only": bool(args.narrow_recovery_only),
             })
             np.savetxt(seq_out / "results_erp.txt", pred, fmt="%.6f", delimiter=",")
@@ -276,7 +335,8 @@ def main(argv=None) -> int:
             print(f"[{idx}/{len(seqs)}] {seq}: FAILED {exc}", file=sys.stderr, flush=True)
     if rows:
         keys = ["sequence", "selected_method", "n_frames", "n_scored", "auc", "sr",
-                "e2e_fps", "od_calls", "od_selected", "route_reasons"]
+                "e2e_fps", "od_calls", "od_selected", "od_v5_selected",
+                "route_reasons"]
         with (out_root / "summary.csv").open("w", encoding="utf-8", newline="") as handle:
             writer = csv.DictWriter(handle, fieldnames=keys)
             writer.writeheader()

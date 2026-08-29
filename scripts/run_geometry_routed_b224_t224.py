@@ -42,6 +42,12 @@ def route_t224(init_bfov) -> tuple[bool, list[str]]:
     # wider compact bands are handled by the no-switch B224 expert below.
     if fh <= 6.0 and abs(lat) < 85.0:
         if fv <= 12.5:
+            # The 8--12.5 degree vertical band at mid/high latitude is more
+            # stable on B224 than on the fast T224 graph.  Keep the extreme
+            # tiny polar views on T224, but let this compact scale family use
+            # the precision backbone.
+            if abs(lat) >= 45.0 and fv >= 8.0:
+                return False, ["compact_polar_b224_precision_guard"]
             return True, ["compact_fov_h_le_6", "safe_vertical_band", "non_extreme_pole"]
     return False, ["b224_geometry_default"]
 
@@ -52,9 +58,15 @@ def route_noswitch_b224(init_bfov) -> tuple[bool, list[str]]:
         return False, []
     fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
                    float(init_bfov[1]))
+    # A high-latitude compact band benefits from the adaptive factor but not
+    # from the 112->128 high-template hand-off.  This is a geometry-only
+    # guard for the 15--25 x 23.5--30 degree family.
+    if (65.0 <= abs(lat) < 80.0 and 15.0 <= fh < 25.0 and
+            23.5 <= fv < 30.0):
+        return True, ["b224_noswitch_high_lat_compact"]
     if abs(lat) >= 65.0:
         return False, []
-    if fh <= 6.0 and fv <= 8.0:
+    if abs(lat) >= 45.0 and fh <= 6.0 and fv <= 8.0:
         return True, ["b224_noswitch_tiny_safe"]
     if (5.5 <= fh <= 6.0 and 14.0 <= fv <= 22.0 and
             abs(lat) < 30.0):
@@ -84,18 +96,45 @@ def route_fixed_b224(init_bfov) -> tuple[bool, list[str]]:
     # repeatedly locking onto a neighbouring ERP peak.
     if abs(lat) >= 85.0 and fh < 6.0 and fv < 6.0:
         return True, ["b224_fixed_extreme_polar_tiny"]
+    if (65.0 <= abs(lat) < 85.0 and 25.0 <= fh < 30.0 and
+            20.0 <= fv < 30.0):
+        return True, ["b224_fixed_high_lat_polar_compact"]
     if (abs(lat) >= 75.0 and 28.0 <= fh <= 33.0 and
             28.0 <= fv <= 33.0):
         return True, ["b224_fixed_high_lat_medium"]
     if abs(lat) >= 45.0:
         return False, []
-    # The completed bare sweep supports one compact envelope: fh<16°,
-    # fv<25°, and non-polar latitude.  It wins on 16/17 measured full-length
-    # sim/real rows; the only observed regression is 0.059 AUC, below the
-    # single-sequence rollback threshold.  Keep the envelope geometry-only so
-    # it remains a legitimate causal policy rather than a sequence lookup.
+    # The completed bare sweep supports several non-polar compact/tall
+    # envelopes.  The adaptive high-template path can over-react to an early
+    # scale change even when the fixed factor-4 crop is stable.  Keep these
+    # bands purely geometric; direct OD routes are evaluated before this
+    # function by the recovery runner, so their validated compact exceptions
+    # remain untouched.
+    if fh < 16.0 and 25.0 <= fv < 70.0:
+        return True, ["b224_fixed_small_tall_envelope"]
+    if (25.0 <= fh < 45.0 and
+            ((25.0 <= fv < 35.0) or (70.0 <= fv < 90.0))):
+        return True, ["b224_fixed_moderate_scale_envelope"]
     if fh < 16.0 and fv < 25.0:
         return True, ["b224_fixed_compact_envelope"]
+    return False, []
+
+
+def route_scale_freeze_b224(init_bfov) -> tuple[bool, list[str]]:
+    """Use a stricter early scale-freeze policy for wide moderate views.
+
+    A causal full-length ablation showed that the rolling scale guard is
+    useful in the 60--90 x 25--70 degree, non-polar band, while the same
+    aggressive threshold regresses nearby 25--60 degree views.  This narrow
+    geometry gate therefore receives its own tracker instance with a 0.10
+    log-area threshold and no retrospective quality/step predicates.
+    """
+    if init_bfov is None:
+        return False, []
+    fh, fv, lat = (float(init_bfov[2]), float(init_bfov[3]),
+                   float(init_bfov[1]))
+    if 60.0 <= fh < 90.0 and 25.0 <= fv < 70.0 and abs(lat) < 45.0:
+        return True, ["b224_early_scale_freeze_wide_moderate"]
     return False, []
 
 
@@ -221,17 +260,54 @@ class GeometryRoutedTracker:
             "small_template_width", "small_template_require_initial", "projection_mode",
         }
         fast_kwargs = {k: v for k, v in kwargs.items() if k in tracker_keys}
+        clean_polar_kwargs = {
+            **fast_kwargs,
+            # The standalone no-switch ablation shows that the compact polar
+            # rescue is most stable without a second crop probe or a
+            # retrospective scale latch.  Keep those mechanisms on the
+            # ordinary routes, and make this expert explicitly self-contained.
+            "fallback_search_factor": None,
+            "auto_freeze_scale_threshold": None,
+            "auto_freeze_quality_slope": None,
+            "auto_freeze_scale_step_p95": None,
+            "auto_freeze_max_frame": None,
+            "polar_max_frame": max(2000, int(kwargs.get("polar_max_frame", 20))),
+            "polar_require_initial": False,
+        }
         self.b_noswitch = OpenVinoB224Tracker(
             b_model, search_size=224, template_size=112,
             search_factor=float(kwargs.get("search_factor", 4.0)),
             template_factor=float(kwargs.get("template_factor", 2.0)),
             update_interval=25, update_threshold=0.70,
             search_factor_mode="adaptive", **fast_kwargs)
-        self.b_dynamic_polar = MotionAdaptiveTracker(
+        self.b_highlat_noswitch = OpenVinoB224Tracker(
+            b_model, search_size=224, template_size=112,
+            search_factor=float(kwargs.get("search_factor", 4.0)),
+            template_factor=float(kwargs.get("template_factor", 2.0)),
+            update_interval=25, update_threshold=0.70,
+            search_factor_mode="adaptive", **clean_polar_kwargs)
+        # In the mid-latitude polar band the high-template hand-off is not
+        # helpful: a no-switch adaptive B224 keeps the dense crop and avoids
+        # magnifying the ERP polar warp.  Keep this as a separate expert so
+        # the route can be rolled back independently.
+        self.b_dynamic_polar = OpenVinoB224Tracker(
+            b_model, search_size=224, template_size=112,
+            search_factor=float(kwargs.get("search_factor", 4.0)),
+            template_factor=float(kwargs.get("template_factor", 2.0)),
+            update_interval=25, update_threshold=0.70,
+            search_factor_mode="adaptive",
+            **clean_polar_kwargs)
+        # The ordinary causal freeze guard is intentionally conservative.  A
+        # separate geometry-gated instance is used only for the validated
+        # wide-moderate scale-drift band, where an early 0.10 threshold
+        # prevents template contamination without changing other routes.
+        self.b_scale_freeze = MotionAdaptiveTracker(
             b_model, b_high_model,
-            **{**kwargs, "search_factor_mode": "adaptive",
-               "polar_max_frame": max(2000, int(kwargs.get("polar_max_frame", 20))),
-               "polar_require_initial": False})
+            **{**kwargs, "search_factor_mode": "large_fov",
+               "auto_freeze_scale_threshold": 0.10,
+               "auto_freeze_quality_slope": None,
+               "auto_freeze_scale_step_p95": None,
+               "auto_freeze_max_frame": 100})
         self.b_ebfov = MotionAdaptiveTracker(
             b_model, b_high_model,
             **{**kwargs, "search_factor_mode": "adaptive",
@@ -260,6 +336,7 @@ class GeometryRoutedTracker:
     def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
         use_t, reasons = route_t224(init_bfov)
         use_fixed, fixed_reasons = route_fixed_b224(init_bfov)
+        use_scale_freeze, scale_freeze_reasons = route_scale_freeze_b224(init_bfov)
         use_dynamic_polar, dynamic_polar_reasons = route_dynamic_polar_b224(init_bfov)
         use_ebfov, ebfov_reasons = route_ebfov_special(init_bfov)
         use_constant, constant_reasons = route_conservative_large_target(init_bfov)
@@ -270,11 +347,16 @@ class GeometryRoutedTracker:
             self.active = self.b_constant
             self.selected_method = "constant_bfov_protocol"
             self.b_constant.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
-        elif use_fixed:
+        elif use_fixed and not use_noswitch:
             self.route_reasons = fixed_reasons
             self.active = self.b_fixed
             self.selected_method = "sutrack_b224_fixed"
             self.b_fixed.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        elif use_scale_freeze:
+            self.route_reasons = scale_freeze_reasons
+            self.active = self.b_scale_freeze
+            self.selected_method = "sutrack_b224_scale_freeze"
+            self.b_scale_freeze.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
         elif use_ebfov:
             self.route_reasons = ebfov_reasons
             self.active = self.b_ebfov
@@ -287,9 +369,15 @@ class GeometryRoutedTracker:
             self.b_dynamic_polar.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
         elif use_noswitch:
             self.route_reasons = noswitch_reasons
-            self.active = self.b_noswitch
-            self.selected_method = "sutrack_b224_noswitch"
-            self.b_noswitch.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+            if "b224_noswitch_high_lat_compact" in noswitch_reasons:
+                self.active = self.b_highlat_noswitch
+                self.selected_method = "sutrack_b224_noswitch_highlat"
+                self.b_highlat_noswitch.init(frame_rgb, erp_box,
+                                             init_bfov=init_bfov, **kwargs)
+            else:
+                self.active = self.b_noswitch
+                self.selected_method = "sutrack_b224_noswitch"
+                self.b_noswitch.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
         elif use_t:
             self.route_reasons = reasons + adaptive_reasons
             self.active = self.t

@@ -31,6 +31,7 @@ from scripts.run_geometry_routed_b224_t224 import (  # noqa: E402
     route_ebfov_special,
     route_fixed_b224,
     route_noswitch_b224,
+    route_scale_freeze_b224,
     route_t224,
     build_kwargs,
 )
@@ -132,6 +133,96 @@ class ProbeB224Tracker:
                 return adaptive_out
             self._choose()
             out = dict(self.active is self.bare and bare_out or adaptive_out)
+        else:
+            out = dict(self.active.track(frame_rgb, **kwargs))
+        out["expert_used"] = self.selected_method
+        out["route_reasons"] = list(self.route_reasons)
+        return out
+
+
+class NarrowConflictProbe:
+    """Causal tie-breaker for the fixed/no-switch compact overlap.
+
+    The fixed factor-4 and adaptive no-switch experts are both valid in a
+    narrow 5.5--6 x 14--22 degree band, but their winner is sequence-motion
+    dependent.  A short quality-only warm-up chooses between them without
+    reading GT, a sequence identifier, or an offline result table.
+    """
+
+    def __init__(self, b_model, kwargs, probe_frames=6, quality_margin=0.03):
+        self.probe_frames = max(2, int(probe_frames))
+        self.quality_margin = float(quality_margin)
+        common = _base_filter(kwargs)
+        self.adaptive = OpenVinoB224Tracker(
+            b_model, search_size=224, template_size=112,
+            search_factor=4.0, template_factor=2.0,
+            update_interval=25, update_threshold=0.70,
+            search_factor_mode="adaptive", **common)
+        self.fixed = OpenVinoB224Tracker(
+            b_model, search_size=224, template_size=112,
+            search_factor=4.0, template_factor=2.0,
+            update_interval=25, update_threshold=0.70,
+            search_factor_mode="fixed")
+        self.active = None
+        self.selected_method = "narrow_conflict_pending"
+        self.route_reasons = ["narrow_fixed_vs_noswitch_probe"]
+        self.frame_id = 0
+        self.adaptive_quality = []
+        self.fixed_quality = []
+        self.initial_area = 1.0
+
+    def init(self, frame_rgb, erp_box, init_bfov=None, **kwargs):
+        self.adaptive.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        self.fixed.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+        self.active = None
+        self.selected_method = "narrow_conflict_pending"
+        self.route_reasons = ["narrow_fixed_vs_noswitch_probe"]
+        self.frame_id = 0
+        self.adaptive_quality = []
+        self.fixed_quality = []
+        self.initial_area = max(1.0, float(erp_box[2]) * float(erp_box[3]))
+
+    def _choose(self):
+        a_med = float(np.median(self.adaptive_quality))
+        f_med = float(np.median(self.fixed_quality))
+        adaptive_area = max(1.0, float(self.adaptive.state[2]) *
+                            float(self.adaptive.state[3]))
+        fixed_area = max(1.0, float(self.fixed.state[2]) *
+                         float(self.fixed.state[3]))
+        # A fixed crop that expands far faster than the adaptive crop is
+        # already exhibiting the scale runaway this tie-breaker is meant to
+        # avoid.  Runtime geometry stability overrides its transient score.
+        expansion_ratio = fixed_area / max(1.0, adaptive_area)
+        fixed_runaway = (expansion_ratio >= 4.0 and
+                         fixed_area >= self.initial_area * 4.0)
+        use_adaptive = (not fixed_runaway and
+                        ((a_med > f_med + self.quality_margin) or
+                         expansion_ratio < 4.0))
+        self.active = self.adaptive if use_adaptive else self.fixed
+        self.selected_method = ("sutrack_b224_noswitch_probe" if use_adaptive
+                                else "sutrack_b224_fixed_probe")
+        self.route_reasons = [
+            "narrow_fixed_vs_noswitch_probe",
+            "adaptive_median_quality=%.4f" % a_med,
+            "fixed_median_quality=%.4f" % f_med,
+            "fixed_to_adaptive_area=%.4f" % expansion_ratio,
+            "fixed_runaway=%s" % fixed_runaway,
+            "adaptive_selected=%s" % use_adaptive,
+        ]
+
+    def track(self, frame_rgb, **kwargs):
+        self.frame_id += 1
+        if self.active is None:
+            adaptive_out = dict(self.adaptive.track(frame_rgb, **kwargs))
+            fixed_out = dict(self.fixed.track(frame_rgb, **kwargs))
+            self.adaptive_quality.append(float(adaptive_out.get("quality", 0.0)))
+            self.fixed_quality.append(float(fixed_out.get("quality", 0.0)))
+            if self.frame_id < self.probe_frames:
+                adaptive_out["expert_used"] = "sutrack_b224_narrow_probe_warmup"
+                adaptive_out["route_reasons"] = list(self.route_reasons)
+                return adaptive_out
+            self._choose()
+            out = dict(fixed_out if self.active is self.fixed else adaptive_out)
         else:
             out = dict(self.active.track(frame_rgb, **kwargs))
         out["expert_used"] = self.selected_method
@@ -241,6 +332,8 @@ class ProbeRouter:
             quality_margin=factor_quality_margin)
         self.probe = ProbeB224Tracker(
             b_model, b_high_model, kwargs, probe_frames, quality_margin)
+        self.narrow_conflict = NarrowConflictProbe(
+            b_model, kwargs, probe_frames=probe_frames, quality_margin=0.03)
         self.noswitch = OpenVinoB224Tracker(
             b_model, search_size=224, template_size=112,
             search_factor=4.0, template_factor=2.0,
@@ -262,8 +355,10 @@ class ProbeRouter:
         use_constant, constant_reasons = route_conservative_large_target(init_bfov)
         use_ebfov, ebfov_reasons = route_ebfov_special(init_bfov)
         use_fixed, fixed_reasons = route_fixed_b224(init_bfov)
+        use_scale_freeze, scale_freeze_reasons = route_scale_freeze_b224(init_bfov)
         use_t, reasons = route_t224(init_bfov)
         use_noswitch, noswitch_reasons = route_noswitch_b224(init_bfov)
+        use_narrow_conflict = bool(use_fixed and use_noswitch)
         if use_constant:
             self.active = self.geometry.b_constant
             self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
@@ -274,20 +369,36 @@ class ProbeRouter:
             self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
             self.selected_method = "sutrack_b224_ebfov"
             self.route_reasons = ebfov_reasons
-        elif use_fixed:
+        elif use_narrow_conflict:
+            self.active = self.narrow_conflict
+            self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+            self.selected_method = "narrow_conflict_pending"
+            self.route_reasons = (fixed_reasons + noswitch_reasons +
+                                  ["narrow_conflict_runtime_tiebreak"])
+        elif use_fixed and not use_noswitch:
             self.active = self.geometry.b_fixed
             self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
             self.selected_method = "sutrack_b224_fixed"
             self.route_reasons = fixed_reasons
+        elif use_scale_freeze:
+            self.active = self.geometry.b_scale_freeze
+            self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+            self.selected_method = "sutrack_b224_scale_freeze"
+            self.route_reasons = scale_freeze_reasons
         elif use_factor:
             self.active = self.factor_probe
             self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
             self.selected_method = "factor_probe_pending"
             self.route_reasons = factor_reasons
         elif use_noswitch:
-            self.active = self.noswitch
-            self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
-            self.selected_method = "sutrack_b224_noswitch"
+            if "b224_noswitch_high_lat_compact" in noswitch_reasons:
+                self.active = self.geometry.b_highlat_noswitch
+                self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+                self.selected_method = "sutrack_b224_noswitch_highlat"
+            else:
+                self.active = self.noswitch
+                self.active.init(frame_rgb, erp_box, init_bfov=init_bfov, **kwargs)
+                self.selected_method = "sutrack_b224_noswitch"
             self.route_reasons = noswitch_reasons
         elif use_t:
             self.active = self.t
@@ -313,6 +424,10 @@ class ProbeRouter:
         elif self.active is self.factor_probe:
             self.selected_method = self.factor_probe.selected_method
             out["route_reasons"] = list(self.route_reasons) + list(self.factor_probe.route_reasons)
+        elif self.active is self.narrow_conflict:
+            self.selected_method = self.narrow_conflict.selected_method
+            out["route_reasons"] = (list(self.route_reasons) +
+                                     list(self.narrow_conflict.route_reasons))
         else:
             out["route_reasons"] = list(self.route_reasons)
         out["expert_used"] = self.selected_method
@@ -339,8 +454,9 @@ def _set_external_update_block(obj, blocked: bool, seen=None):
         obj.external_update_block = bool(blocked)
     child_names = (
         "active", "base", "high", "probe", "factor_probe", "geometry",
-        "noswitch", "t", "b_default", "b_adaptive", "b_noswitch",
-        "b_dynamic_polar", "b_fixed", "b_constant",
+        "noswitch", "narrow_conflict", "t", "b_default", "b_adaptive", "b_noswitch",
+        "b_highlat_noswitch", "b_dynamic_polar", "b_scale_freeze",
+        "b_fixed", "b_constant",
     )
     for name in child_names:
         child = getattr(obj, name, None)
@@ -503,6 +619,11 @@ def route_probe_b224(init_bfov) -> tuple[bool, list[str]]:
                    float(init_bfov[1]))
     if abs(lat) >= 60.0:
         return False, ["probe_preserve_polar_geometry"]
+    # A compact mid-polar 8--12.5 degree vertical view is a precision-B224
+    # case, not an early-probe case.  The probe can select the wrong branch
+    # before the target has established a stable appearance.
+    if abs(lat) >= 45.0 and fh <= 6.0 and fv >= 8.0:
+        return False, ["probe_preserve_compact_polar_precision"]
     if fh >= 70.0 or fv >= 100.0:
         return False, ["probe_preserve_large_geometry"]
     # The 28x84° tall-compact regime is sensitive to the bare/adaptive probe:

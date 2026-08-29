@@ -74,7 +74,10 @@ class SphericalB224RedetectTracker:
                  anchor_min_similarity=0.50, max_motion_deg=120.0,
                  erp_downscale=3, od_model=None, od_first_model=None,
                  od_projection="tangent", od_cadence=15,
-                 od_lost_cadence=5, od_quality_threshold=0.55):
+                 od_lost_cadence=5, od_quality_threshold=0.55,
+                 redetect_lon_per_band=2, redetect_half_lon=95.0,
+                 redetect_half_lat=70.0,
+                 redetect_template_scales=(0.85, 1.0, 1.2)):
         self.b_model = b_model
         self.b_high_model = b_high_model
         self.tracker_kwargs = dict(tracker_kwargs)
@@ -92,6 +95,10 @@ class SphericalB224RedetectTracker:
         self.od_cadence = max(1, int(od_cadence))
         self.od_lost_cadence = max(1, int(od_lost_cadence))
         self.od_quality_threshold = float(od_quality_threshold)
+        self.redetect_lon_per_band = max(2, int(redetect_lon_per_band))
+        self.redetect_half_lon = float(redetect_half_lon)
+        self.redetect_half_lat = float(redetect_half_lat)
+        self.redetect_template_scales = tuple(float(v) for v in redetect_template_scales)
         self.od = (OpenVinoODTrackTracker(
             od_model, search_size=384, template_size=192,
             search_factor=5.0, template_factor=2.0,
@@ -129,10 +136,10 @@ class SphericalB224RedetectTracker:
             self.memory.get_bank,
             min_score=self.min_score,
             lat_bands=(-60.0, 0.0, 60.0),
-            lon_per_band=(2, 2, 2),
-            view_half_lon=95.0,
-            view_half_lat=70.0,
-            template_scales=(0.85, 1.0, 1.2),
+            lon_per_band=(self.redetect_lon_per_band,) * 3,
+            view_half_lon=self.redetect_half_lon,
+            view_half_lat=self.redetect_half_lat,
+            template_scales=self.redetect_template_scales,
         )
 
     def _anchor_similarity(self, frame, box):
@@ -384,7 +391,14 @@ def main(argv=None) -> int:
     ap.add_argument("--od-lost-cadence", type=int, default=5,
                     help="OD cadence while B224 is in LOST")
     ap.add_argument("--od-quality-threshold", type=float, default=0.55)
+    ap.add_argument("--redetect-lon-per-band", type=int, default=2)
+    ap.add_argument("--redetect-half-lon", type=float, default=95.0)
+    ap.add_argument("--redetect-half-lat", type=float, default=70.0)
+    ap.add_argument("--redetect-template-scales", default="0.85,1.0,1.2",
+                    help="comma-separated causal redetect template scales")
     args = ap.parse_args(argv)
+    redetect_scales = tuple(float(v) for v in args.redetect_template_scales.split(",")
+                            if v.strip())
     import openvino as ov
 
     t0 = time.perf_counter()
@@ -419,7 +433,11 @@ def main(argv=None) -> int:
                 od_projection=args.od_projection,
                 od_cadence=args.od_cadence,
                 od_lost_cadence=args.od_lost_cadence,
-                od_quality_threshold=args.od_quality_threshold)
+                od_quality_threshold=args.od_quality_threshold,
+                redetect_lon_per_band=args.redetect_lon_per_band,
+                redetect_half_lon=args.redetect_half_lon,
+                redetect_half_lat=args.redetect_half_lat,
+                redetect_template_scales=redetect_scales)
             holder["tracker"] = tracker
             return tracker
 
