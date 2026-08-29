@@ -250,12 +250,9 @@ def main(argv: list[str] | None = None) -> int:
     base_od = repo / "artifacts" / "server_snapshot" / "weights" / "ODTrack_ep0300.pth.tar"
     if not base_od.is_file():
         raise FileNotFoundError(base_od)
-    sutrack_src = _find_one(exit_root / "upstream_sources" / "sutrack", "README.md").parent
-    # The source tree is normally the only child; resolve it if README lived
-    # one level above the actual checkout.
+    sutrack_src = exit_root / "upstream_sources" / "sutrack" / "SUTrack"
     if not (sutrack_src / "lib").is_dir():
-        candidates = [item for item in (exit_root / "upstream_sources" / "sutrack").iterdir() if item.is_dir()]
-        sutrack_src = next((item for item in candidates if (item / "lib").is_dir()), sutrack_src)
+        raise FileNotFoundError(sutrack_src / "lib")
     lorat_src = exit_root / "upstream_sources" / "lorat" / "lorat"
     uetrack_src = exit_root / "upstream_sources" / "uetrack" / "UETrack"
     if not lorat_src.is_dir():
