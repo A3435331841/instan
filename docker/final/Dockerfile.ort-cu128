@@ -1,0 +1,38 @@
+# Primary GRT-360 v5 runtime: exported ONNX graphs on ONNX Runtime CUDA.
+# Build context is produced by scripts/prepare_team_delivery.py; it contains
+# only source and the selected, checksum-verified ONNX files.
+ARG BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="GRT-360 v5 final (ONNX Runtime CUDA)"
+LABEL org.opencontainers.image.description="Causal B224/T224/ODTrack geometry router; no GT or sequence lookup"
+LABEL grt360.profile="v5_final"
+LABEL grt360.backend="onnxruntime-gpu"
+LABEL grt360.cuda="12.8"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    DATASET_DIR=/mnt/dataset \
+    RESULT_DIR=/mnt/result \
+    GRT360_MODEL_ROOT=/opt/models \
+    GRT360_PROFILE=v5_final
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-pip libglib2.0-0 libgl1 libgomp1 \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip install --no-cache-dir --upgrade pip
+
+COPY docker/final/requirements.ort-cu128.txt /tmp/requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt
+
+COPY src/ /opt/grt360/
+COPY models/ /opt/models/
+
+WORKDIR /opt/grt360
+RUN python3 -m py_compile integrations/final/arena_protocol_v5.py integrations/final/ort_adapter.py \
+    && python3 -c "import cv2, onnxruntime as ort; print('ORT', ort.__version__, ort.get_available_providers())"
+
+ENTRYPOINT ["python3", "/opt/grt360/integrations/final/arena_protocol_v5.py"]

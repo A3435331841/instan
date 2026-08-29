@@ -1,0 +1,43 @@
+# PyTorch CUDA reference/fallback runtime for GRT-360.
+# This image runs original SUTrack B224 or T224 ERP three-tile inference.  It
+# is intentionally benchmarked beside, rather than substituted for, the
+# primary ONNX Runtime v5 multi-expert image.
+ARG BASE_IMAGE=nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04
+FROM ${BASE_IMAGE}
+
+LABEL org.opencontainers.image.title="GRT-360 PyTorch CUDA reference"
+LABEL org.opencontainers.image.description="SUTrack B224/T224 ERP reference for backend comparison and fallback"
+LABEL grt360.backend="pytorch-cu128"
+LABEL grt360.cuda="12.8"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_ROOT_USER_ACTION=ignore \
+    DATASET_DIR=/mnt/dataset \
+    RESULT_DIR=/mnt/result \
+    GRT360_MODEL_ROOT=/opt/models \
+    SUTRACK_WORKSPACE=/opt/sutrack \
+    GRT360_TORCH_PROFILE=b224_erp
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      python3 python3-pip libglib2.0-0 libgl1 libgomp1 git \
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m pip install --no-cache-dir --upgrade pip \
+    && python3 -m pip install --no-cache-dir \
+      torch==2.7.0+cu128 torchvision==0.22.0+cu128 \
+      --index-url https://download.pytorch.org/whl/cu128
+
+COPY docker/final/requirements.torch-cu128.txt /tmp/requirements.txt
+RUN python3 -m pip install --no-cache-dir -r /tmp/requirements.txt
+
+COPY src/ /opt/grt360/
+COPY sutrack_src/ /opt/sutrack/
+COPY models/ /opt/models/
+
+WORKDIR /opt/grt360
+RUN python3 -m py_compile integrations/final/arena_protocol_v5_torch.py \
+    && python3 -c "import torch, cv2, timm; print('torch', torch.__version__, 'cuda', torch.version.cuda)"
+
+ENTRYPOINT ["python3", "/opt/grt360/integrations/final/arena_protocol_v5_torch.py"]

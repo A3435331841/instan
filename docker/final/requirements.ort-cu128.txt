@@ -1,0 +1,5 @@
+# Primary v5 runtime.  CUDA provider is supplied by onnxruntime-gpu; the
+# CUDA 12.8 + cuDNN runtime base image provides its native dependencies.
+numpy>=1.26,<2.1
+opencv-python-headless>=4.10,<4.12
+onnxruntime-gpu==1.22.0

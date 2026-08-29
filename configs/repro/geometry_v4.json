@@ -1,0 +1,20 @@
+{
+  "schema": "grt360.repro_profile.v1",
+  "name": "geometry_v4",
+  "description": "Legacy geometry route before trained v5 OD direct experts.  Reconstructed from its recorded policy and locked result manifest.",
+  "git_ref": "4bd288e",
+  "backend": "ort_cuda",
+  "models": {
+    "sutrack_b224_onnx": "sutrack_b224_frame.onnx",
+    "sutrack_b224_high_onnx": "sutrack_b224_s224_t128.onnx",
+    "sutrack_t224_onnx": "sutrack_t224_s224_t112.onnx",
+    "odtrack_base_first_onnx": "odtrack_first.onnx",
+    "odtrack_base_state_onnx": "odtrack_state.onnx"
+  },
+  "routing": "geometry_v4_legacy",
+  "reference": {
+    "full130_auc": 0.6932785824,
+    "full130_sr": 0.8421712258,
+    "full130_weighted_e2e_fps": 36.9348642528
+  }
+}

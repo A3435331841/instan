@@ -1,0 +1,30 @@
+{
+  "schema": "grt360.final_delivery_assets.v1",
+  "source_commit": "a7ac8bc",
+  "github_contains": ["source", "configs", "docs", "small_manifests", "docker_build_definitions"],
+  "github_excludes": ["datasets", "weights", "checkpoints", "onnx", "openvino", "run_traces"],
+  "local_delivery_root": "D:\\instan\\grt360_deliverables\\team_v5_20260829",
+  "packages": {
+    "GRT360_FINAL_ORT_CUDA128": {
+      "purpose": "primary v5 ONNX Runtime CUDA 12.8 image",
+      "models": ["sutrack_b224_frame.onnx", "sutrack_b224_s224_t128.onnx", "sutrack_t224_s224_t112.onnx", "odtrack_first.onnx", "odtrack_state.onnx", "odtrack_v5_ep6_first.onnx", "odtrack_v5_ep6_state.onnx"]
+    },
+    "GRT360_FINAL_TORCH_CUDA128": {
+      "purpose": "PyTorch CUDA B224/T224 reference and fallback",
+      "models": ["SUTRACK_b224_ep0180.pth.tar", "SUTRACK_t224_ep0180.pth.tar"]
+    },
+    "GRT360_CONTINUE_TRAINING": {
+      "purpose": "team continuation and further optimization",
+      "models": ["ODTrack_ep0006.pth.tar", "sutrack_lora_ep0005.pth", "SUTRACK_b224_ep0180.pth.tar", "SUTRACK_t224_ep0180.pth.tar"]
+    },
+    "GRT360_HISTORY_ARCHIVE": {
+      "purpose": "local-only checkpoint, graph, run and provenance lineage",
+      "github_upload": false
+    }
+  },
+  "policy": {
+    "large_files_on_github": false,
+    "competition_docker_push": false,
+    "deletion_performed": false
+  }
+}

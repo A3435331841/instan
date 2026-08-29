@@ -1,0 +1,16 @@
+{
+  "schema": "grt360.repro_profile.v1",
+  "name": "odtrack_prelim",
+  "description": "Original ODTrack ERP three-tile preliminary baseline.",
+  "git_ref": "grt360-server-exit-20260827",
+  "backend": "torch_cuda",
+  "models": {
+    "odtrack_base": "ODTrack_ep0300_inference.pth"
+  },
+  "routing": "odtrack_erp_three_tile",
+  "reference": {
+    "full130_auc": 0.5813,
+    "full130_sr": 0.6853,
+    "full130_e2e_fps": 27.4
+  }
+}

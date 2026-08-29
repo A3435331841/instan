@@ -1,0 +1,17 @@
+{
+  "schema": "grt360.repro_profile.v1",
+  "name": "sutrack_b224",
+  "description": "SUTrack-B224 ERP three-tile single-model baseline.",
+  "git_ref": "4bd288e",
+  "backend": "torch_cuda",
+  "models": {
+    "sutrack_b224": "SUTRACK_b224_ep0180.pth.tar",
+    "sutrack_b224_onnx": "sutrack_b224_frame.onnx"
+  },
+  "routing": "b224_single",
+  "reference": {
+    "full130_auc": 0.6550187120,
+    "full130_sr": 0.7837450391,
+    "full130_weighted_e2e_fps": 31.6693896996
+  }
+}
