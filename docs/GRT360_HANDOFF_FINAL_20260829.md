@@ -692,4 +692,3 @@ D:\instan\grt360_deliverables\team_v5_20260829\MIGRATION_COMPLETE.json
 ~~~
 
 如果本文与旧交接文档冲突，以当前 Git 标签、交付包 manifest 和上面列出的 v5 JSON 为准；旧文档仅保留历史背景，不用于重新选择提交方案。
-
