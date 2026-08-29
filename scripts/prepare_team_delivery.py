@@ -152,7 +152,7 @@ class PackageBuilder:
                     if not match.groups():
                         raise RuntimeError(f"possible secret in delivery payload: {path}")
                     rhs = match.group(1).strip().lower()
-                    if rhs.startswith(("os.environ", "os.getenv", "getenv(", "$env:", "${")):
+                    if rhs.startswith(("os.environ", "os.getenv", "getenv(", "get_global_constant", "$env:", "${")):
                         continue
                     if rhs in {"none", "null", "required", "key", "value"}:
                         continue

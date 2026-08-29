@@ -45,7 +45,7 @@ def _is_secret_match(pattern: re.Pattern, text: str) -> bool:
         if not match.groups():
             return True
         rhs = match.group(1).strip().lower()
-        if rhs.startswith(("os.environ", "os.getenv", "getenv(", "$env:", "${")):
+        if rhs.startswith(("os.environ", "os.getenv", "getenv(", "get_global_constant", "$env:", "${")):
             continue
         if rhs in {"none", "null", "required", "key", "value"}:
             continue
